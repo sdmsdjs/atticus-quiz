@@ -141,9 +141,27 @@ const toScriptJson = (slides: HtmlQuizSlide[]): string =>
         .replace(/\u2028/g, '\\u2028')
         .replace(/\u2029/g, '\\u2029');
 
+const hasMathSyntax = (value: string): boolean => {
+    const text = String(value || '');
+    return /\\\(|\\\)|\\\[|\\\]|\\begin\{|\\end\{|\\frac|\\sqrt|\\sum|\\int|\\lim|\\times|\\cdot|\\leq|\\geq|\$\$|<math\b|<\/math>/i.test(text)
+        || /\$[^$\n]{1,200}\$/.test(text);
+};
+
+const shouldLoadMathJax = (slides: HtmlQuizSlide[]): boolean =>
+    slides.some(slide =>
+        hasMathSyntax(slide.content)
+        || hasMathSyntax(slide.explanation)
+        || hasMathSyntax(slide.correct_answer)
+        || slide.options.some(option => hasMathSyntax(option.text))
+    );
+
 export const buildHtmlDocument = (questions: Question[], title = makeExportBaseName(questions)): string => {
     const safeTitle = escapeHtml(title);
-    const slidesJson = toScriptJson(buildHtmlSlides(questions));
+    const slides = buildHtmlSlides(questions);
+    const slidesJson = toScriptJson(slides);
+    const mathJaxScript = shouldLoadMathJax(slides)
+        ? '<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>'
+        : '';
 
     return `<!DOCTYPE html>
 <html lang="vi">
@@ -151,7 +169,7 @@ export const buildHtmlDocument = (questions: Question[], title = makeExportBaseN
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>${safeTitle}</title>
-<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+${mathJaxScript}
 <style>
 :root { --base-size: 34px; --opt-size: 30px; --badge-size: 50px; --math-scale: 115%; }
 * { box-sizing: border-box; }
