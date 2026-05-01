@@ -164,6 +164,9 @@ body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background:
 .zoom-btn { width: 45px; height: 45px; border-radius: 50%; border: 2px solid #cbd5e1; background: white; color: #334155; font-size: 24px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; touch-action: manipulation; }
 .zoom-btn:hover { background: #e2e8f0; color: #0f172a; border-color: #94a3b8; }
 .zoom-btn:active { transform: scale(0.95); }
+.search-btn { width: 42px; height: 42px; border-radius: 50%; border: 2px solid #93c5fd; background: #eff6ff; color: #1d4ed8; font-size: 20px; font-weight: 900; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; touch-action: manipulation; }
+.search-btn:hover { background: #dbeafe; color: #1e40af; border-color: #60a5fa; transform: translateY(-1px); }
+.search-btn:active { transform: scale(0.95); }
 .timer { font-size: 24px; color: #64748b; font-weight: 800; background: #f1f5f9; padding: 10px 25px; border-radius: 30px; cursor: pointer; border: 3px solid transparent; transition: 0.3s; display: flex; align-items: center; gap: 8px; min-width: 180px; justify-content: center; touch-action: manipulation; }
 .timer:hover { background: #e2e8f0; }
 .timer.running { color: #dc2626; background: #fee2e2; border-color: #fca5a5; animation: pulse 1s infinite; }
@@ -329,6 +332,43 @@ function esc(value) {
 function lines(value) { return esc(value).replace(/\\n/g, '<br>'); }
 function formatTime(s) { let m = Math.floor(s/60); let sec = s%60; return (m<10?'0':'') + m + ':' + (sec<10?'0':'') + sec; }
 function b64Encode(value) { return btoa(unescape(encodeURIComponent(String(value || '')))); }
+function normalizedText(el) {
+    return el ? String(el.textContent || '').replace(/\\s+/g, ' ').trim() : '';
+}
+function optionSearchText(btn) {
+    const clone = btn.cloneNode(true);
+    const badge = clone.querySelector('.opt-badge');
+    const label = badge ? normalizedText(badge) : '';
+    if (badge) badge.remove();
+    const text = normalizedText(clone);
+    return (label && text ? label + '. ' : label) + text;
+}
+function currentSearchQuery() {
+    const slide = document.querySelector('.slide-container.active');
+    if (!slide) return '';
+    const parts = [];
+    const question = normalizedText(slide.querySelector('.question-content'));
+    if (question) parts.push(question);
+    slide.querySelectorAll('.btn-option').forEach(function(btn) {
+        const text = optionSearchText(btn);
+        if (text) parts.push(text);
+    });
+    slide.querySelectorAll('.tf-content').forEach(function(row) {
+        const text = normalizedText(row);
+        if (text) parts.push(text);
+    });
+    const input = slide.querySelector('.answer-input');
+    if (input && input.value.trim()) parts.push('Dap an da nhap: ' + input.value.trim());
+    return parts.join(' ');
+}
+function searchCurrentSlide() {
+    const query = currentSearchQuery();
+    if (!query) return;
+    const url = 'https://www.google.com/search?q=' + encodeURIComponent(query);
+    const tab = window.open(url, '_blank');
+    if (tab) tab.opener = null;
+    else window.location.href = url;
+}
 function buildSlides(data) {
     const root = document.getElementById('slides-root');
     root.innerHTML = data.map(function(item, index) {
@@ -352,7 +392,7 @@ function buildSlides(data) {
             answerArea = '<div class="short-answer-area"><div class="input-group"><input class="answer-input" placeholder="Nhập đáp án..." onkeydown="handleEnter(event, ' + index + ', \\'' + answerB64 + '\\')"></div></div>';
             actions = '<button id="btn-chk-' + index + '" class="btn-action btn-check" onclick="checkShort(this, \\'' + answerB64 + '\\')">Kiểm tra</button><button class="btn-action btn-reveal" onclick="revealShort(this, \\'' + answerB64 + '\\')">Hiện đáp án</button>';
         }
-        return '<section id="slide-' + index + '" class="slide-container"><div class="q-header"><div class="header-left"><div class="part-badge">Phần ' + esc(item.part) + '</div></div><div class="header-right"><button class="zoom-btn" onclick="changeFontSize(-2)">−</button><button class="zoom-btn" onclick="changeFontSize(2)">+</button><div class="timer" data-time="' + time + '" onclick="startTimer(this)" ondblclick="editTimer(this)">⏳ Bắt đầu (' + formatTime(time) + ')</div><button class="btn-exit-html" onclick="window.close()">Thoát</button></div></div><div class="content-wrapper"><div class="question-content"><span class="q-label">' + esc(item.title) + '.</span>' + lines(item.content) + '</div>' + image + answerArea + '<div class="explanation-box"><div class="explanation-title">Giải thích</div><div class="explanation-content">' + lines(item.explanation || 'Chưa có giải thích.') + '</div></div></div><div class="actions-area">' + actions + '<button class="btn-action btn-explain" onclick="toggleExpl(this)">Giải thích</button><div class="slide-counter"></div></div><button class="nav-arrow nav-prev" onclick="prevSlide()">‹</button><button class="nav-arrow nav-next" onclick="nextSlide()">›</button><div class="feedback-anchor"></div></section>';
+        return '<section id="slide-' + index + '" class="slide-container"><div class="q-header"><div class="header-left"><div class="part-badge">Phần ' + esc(item.part) + '</div></div><div class="header-right"><button class="search-btn" onclick="searchCurrentSlide()" title="Tim cau nay tren Google" aria-label="Tim cau nay tren Google">&#128269;</button><button class="zoom-btn" onclick="changeFontSize(-2)">−</button><button class="zoom-btn" onclick="changeFontSize(2)">+</button><div class="timer" data-time="' + time + '" onclick="startTimer(this)" ondblclick="editTimer(this)">⏳ Bắt đầu (' + formatTime(time) + ')</div><button class="btn-exit-html" onclick="window.close()">Thoát</button></div></div><div class="content-wrapper"><div class="question-content"><span class="q-label">' + esc(item.title) + '.</span>' + lines(item.content) + '</div>' + image + answerArea + '<div class="explanation-box"><div class="explanation-title">Giải thích</div><div class="explanation-content">' + lines(item.explanation || 'Chưa có giải thích.') + '</div></div></div><div class="actions-area">' + actions + '<button class="btn-action btn-explain" onclick="toggleExpl(this)">Giải thích</button><div class="slide-counter"></div></div><button class="nav-arrow nav-prev" onclick="prevSlide()">‹</button><button class="nav-arrow nav-next" onclick="nextSlide()">›</button><div class="feedback-anchor"></div></section>';
     }).join('');
 }
 function showFeedback(isCorrect, slideElement) {
@@ -683,7 +723,7 @@ function buildSlides(data) {
             answerArea = '<div class="short-answer-area"><div class="input-group"><input class="answer-input" placeholder="Nhập đáp án..." onkeydown="handleEnter(event, ' + index + ', \\'' + answerB64 + '\\')"></div></div>';
             actions = '<button id="btn-chk-' + index + '" class="btn-action btn-check" onclick="checkShort(this, \\'' + answerB64 + '\\')">Kiểm tra</button><button class="btn-action btn-reveal" onclick="revealShort(this, \\'' + answerB64 + '\\')">Hiện đáp án</button>';
         }
-        return '<section id="slide-' + index + '" class="slide-container" data-slide-index="' + index + '" data-original-index="' + item._id + '"><div class="q-header"><div class="header-left"><div class="part-badge">Phần ' + esc(item.part) + '</div><div class="mode-badge">' + esc(currentRunIsReview ? 'Vòng ôn câu sai' : getMode().title) + '</div></div><div class="header-right"><button class="zoom-btn" onclick="changeFontSize(-2)">-</button><button class="zoom-btn" onclick="changeFontSize(2)">+</button><div class="timer" data-time="' + time + '" onclick="startTimer(this)" ondblclick="editTimer(this)">Bắt đầu (' + formatTime(time) + ')</div><button class="btn-home-html" onclick="renderHome()">Trang chủ</button><button class="btn-exit-html" onclick="window.close()">Thoát</button></div></div><div class="content-wrapper"><div class="question-content"><span class="q-label">' + esc(item.title) + '.</span>' + lines(item.content) + '</div>' + image + answerArea + '<div class="explanation-box"><div class="explanation-title">Giải thích</div><div class="explanation-content">' + lines(item.explanation || 'Chưa có giải thích.') + '</div></div></div><div class="actions-area">' + actions + '<button class="btn-action btn-explain" onclick="toggleExpl(this)">Giải thích</button><div class="slide-counter"></div></div><button class="nav-arrow nav-prev" onclick="prevSlide()">&lt;</button><button class="nav-arrow nav-next" onclick="nextSlide()">&gt;</button><div class="feedback-anchor"></div></section>';
+        return '<section id="slide-' + index + '" class="slide-container" data-slide-index="' + index + '" data-original-index="' + item._id + '"><div class="q-header"><div class="header-left"><div class="part-badge">Phần ' + esc(item.part) + '</div><div class="mode-badge">' + esc(currentRunIsReview ? 'Vòng ôn câu sai' : getMode().title) + '</div></div><div class="header-right"><button class="search-btn" onclick="searchCurrentSlide()" title="Tim cau nay tren Google" aria-label="Tim cau nay tren Google">&#128269;</button><button class="zoom-btn" onclick="changeFontSize(-2)">-</button><button class="zoom-btn" onclick="changeFontSize(2)">+</button><div class="timer" data-time="' + time + '" onclick="startTimer(this)" ondblclick="editTimer(this)">Bắt đầu (' + formatTime(time) + ')</div><button class="btn-home-html" onclick="renderHome()">Trang chủ</button><button class="btn-exit-html" onclick="window.close()">Thoát</button></div></div><div class="content-wrapper"><div class="question-content"><span class="q-label">' + esc(item.title) + '.</span>' + lines(item.content) + '</div>' + image + answerArea + '<div class="explanation-box"><div class="explanation-title">Giải thích</div><div class="explanation-content">' + lines(item.explanation || 'Chưa có giải thích.') + '</div></div></div><div class="actions-area">' + actions + '<button class="btn-action btn-explain" onclick="toggleExpl(this)">Giải thích</button><div class="slide-counter"></div></div><button class="nav-arrow nav-prev" onclick="prevSlide()">&lt;</button><button class="nav-arrow nav-next" onclick="nextSlide()">&gt;</button><div class="feedback-anchor"></div></section>';
     }).join('');
 }
 function showFeedback(isCorrect, slideElement) {
