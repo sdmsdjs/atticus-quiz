@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Question, QuestionType, ParsedQuestion } from './types';
-import { DEFAULT_GEMINI_MODEL, parseQuizFromFile, solveQuestionWithSearch } from './services/geminiService';
+import { DEFAULT_GEMINI_MODEL, parseQuizFromFile, solveQuestionsWithSearch } from './services/geminiService';
 import { exportToXlsx, makeExportBaseName, sanitizeFileName } from './utils/xlsxExporter';
 import { createHtmlPreviewUrl, exportToHtml } from './utils/htmlExporter';
 import { importOutputQuestions } from './utils/quizImporter';
@@ -17,6 +17,7 @@ const AI_MODEL_STORAGE_KEY = 'quiz-helper-ai-model';
 const API_DELAY_STORAGE_KEY = 'quiz-helper-api-delay-ms';
 const RETRY_COUNT_STORAGE_KEY = 'quiz-helper-retry-count';
 const RETRY_DELAY_STORAGE_KEY = 'quiz-helper-retry-delay-ms';
+const SOLVE_BATCH_SIZE_STORAGE_KEY = 'quiz-helper-solve-batch-size';
 const SPLIT_MODE_STORAGE_KEY = 'quiz-helper-split-mode';
 const QUESTIONS_PER_CHUNK_STORAGE_KEY = 'quiz-helper-questions-per-chunk';
 const SECTIONS_PER_CHUNK_STORAGE_KEY = 'quiz-helper-sections-per-chunk';
@@ -43,6 +44,29 @@ type ExportGroup = {
   name: string;
   questions: Question[];
 };
+
+type ApiKeyIssueKind = 'quota-limit' | 'temporary' | 'auth' | 'other';
+
+type ApiKeyDisplayStatus = {
+  index: number;
+  label: string;
+  state: 'ready' | 'running' | 'limited' | 'invalid' | 'error';
+  successCount: number;
+  failureCount: number;
+  lastError?: string;
+  lastErrorKind?: ApiKeyIssueKind;
+  lastUsedAt?: number;
+};
+
+type SolveTask = {
+  id: string;
+  index: number;
+  question: Question;
+};
+
+class ApiKeyUnavailableError extends Error {}
+
+class NoAvailableApiKeyError extends Error {}
 
 const runWithConcurrency = async <T, R,>(
   items: T[],
@@ -75,41 +99,6 @@ const parseApiKeys = (value: string): string[] =>
       .filter(Boolean)
   ));
 
-const createApiKeyPool = (apiKeys: string[], delayMs: number) => {
-  const states = apiKeys.map(key => ({
-    key,
-    readyAt: 0,
-    chain: Promise.resolve() as Promise<void>,
-  }));
-  let cursor = 0;
-
-  return {
-    run: async <R,>(worker: (apiKey: string) => Promise<R>): Promise<R> => {
-      if (states.length === 0) {
-        throw new Error('Hay nhap it nhat 1 Gemini API key.');
-      }
-
-      const state = states[cursor % states.length];
-      cursor += 1;
-
-      const current = state.chain.then(async () => {
-        const waitMs = Math.max(0, state.readyAt - Date.now());
-        if (waitMs > 0) {
-          await sleep(waitMs);
-        }
-
-        state.readyAt = Date.now() + delayMs;
-        return worker(state.key);
-      });
-
-      state.chain = current.then(() => undefined, () => undefined);
-      return current;
-    },
-  };
-};
-
-type ApiKeyPool = ReturnType<typeof createApiKeyPool>;
-
 const getErrorMessage = (err: unknown): string => {
   if (err instanceof Error && err.message) return err.message;
   if (typeof err === 'string') return err;
@@ -121,7 +110,143 @@ const getErrorMessage = (err: unknown): string => {
   }
 };
 
+const maskApiKey = (key: string): string => {
+  if (key.length <= 8) return `${key.slice(0, 2)}...${key.slice(-2)}`;
+  return `${key.slice(0, 4)}...${key.slice(-4)}`;
+};
+
+const createApiKeyStatus = (key: string, index: number): ApiKeyDisplayStatus => ({
+  index,
+  label: `Key ${index + 1} (${maskApiKey(key)})`,
+  state: 'ready',
+  successCount: 0,
+  failureCount: 0,
+});
+
+const classifyAiError = (err: unknown): ApiKeyIssueKind => {
+  const message = getErrorMessage(err);
+
+  if (/(?:401|403|API_KEY_INVALID|invalid api key|api key not valid|permission denied|unauthorized)/i.test(message)) {
+    return 'auth';
+  }
+
+  if (/(?:429|RESOURCE_EXHAUSTED|quota|rate|limit)/i.test(message)) {
+    return 'quota-limit';
+  }
+
+  if (/(?:503|UNAVAILABLE|high demand|overloaded|temporar|timeout)/i.test(message)) {
+    return 'temporary';
+  }
+
+  return 'other';
+};
+
+const createApiKeyPool = (
+  apiKeys: string[],
+  delayMs: number,
+  onStatusChange?: (statuses: ApiKeyDisplayStatus[]) => void
+) => {
+  const states = apiKeys.map((key, index) => ({
+    key,
+    readyAt: 0,
+    chain: Promise.resolve() as Promise<void>,
+    disabled: false,
+    ...createApiKeyStatus(key, index),
+  }));
+  let cursor = 0;
+
+  const publish = () => {
+    onStatusChange?.(states.map(state => ({
+      index: state.index,
+      label: state.label,
+      state: state.state,
+      successCount: state.successCount,
+      failureCount: state.failureCount,
+      lastError: state.lastError,
+      lastErrorKind: state.lastErrorKind,
+      lastUsedAt: state.lastUsedAt,
+    })));
+  };
+
+  const nextState = () => {
+    for (let i = 0; i < states.length; i += 1) {
+      const state = states[cursor % states.length];
+      cursor += 1;
+      if (!state.disabled) return state;
+    }
+
+    return null;
+  };
+
+  return {
+    size: states.length,
+    hasAvailableKey: () => states.some(state => !state.disabled),
+    run: async <R,>(worker: (apiKey: string) => Promise<R>): Promise<R> => {
+      if (states.length === 0) {
+        throw new Error('Hay nhap it nhat 1 Gemini API key.');
+      }
+
+      const state = nextState();
+      if (!state) {
+        throw new NoAvailableApiKeyError('Tat ca API key dang tam dung trong lan chay nay. Xem bang trang thai key de biet key nao can thay.');
+      }
+
+      const current = state.chain.then(async () => {
+        if (state.disabled) {
+          throw new ApiKeyUnavailableError(`${state.label} da bi tam dung, chuyen sang key khac.`);
+        }
+
+        const waitMs = Math.max(0, state.readyAt - Date.now());
+        if (waitMs > 0) {
+          await sleep(waitMs);
+        }
+
+        state.readyAt = Date.now() + delayMs;
+        state.state = 'running';
+        state.lastUsedAt = Date.now();
+        publish();
+
+        try {
+          const result = await worker(state.key);
+          state.successCount += 1;
+          state.state = 'ready';
+          publish();
+          return result;
+        } catch (err) {
+          const kind = classifyAiError(err);
+          const message = getErrorMessage(err);
+
+          state.failureCount += 1;
+          state.lastError = message;
+          state.lastErrorKind = kind;
+
+          if (kind === 'quota-limit' || kind === 'auth') {
+            state.disabled = true;
+            state.state = kind === 'auth' ? 'invalid' : 'limited';
+          } else {
+            state.state = 'error';
+          }
+
+          publish();
+          throw new Error(`${state.label}: ${message}`);
+        }
+      });
+
+      state.chain = current.then(() => undefined, () => undefined);
+      return current;
+    },
+  };
+};
+
+type ApiKeyPool = ReturnType<typeof createApiKeyPool>;
+
 const isRetryableAiError = (err: unknown): boolean => {
+  if (err instanceof ApiKeyUnavailableError) return true;
+  if (err instanceof NoAvailableApiKeyError) return false;
+
+  const kind = classifyAiError(err);
+  if (kind === 'quota-limit' || kind === 'temporary') return true;
+
   const message = getErrorMessage(err);
   return /(?:503|429|UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|rate|quota|overloaded|temporar)/i.test(message);
 };
@@ -133,20 +258,30 @@ const runAiWithRetries = async <R,>(
   retryDelayMs: number
 ): Promise<R> => {
   let lastError: unknown;
+  const effectiveRetryCount = Math.max(retryCount, Math.max(0, pool.size - 1));
 
-  for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+  for (let attempt = 0; attempt <= effectiveRetryCount; attempt += 1) {
     try {
       return await pool.run(worker);
     } catch (err) {
       lastError = err;
+      const errorKind = classifyAiError(err);
+      const canSwitchKey = pool.hasAvailableKey() && (
+        errorKind === 'quota-limit' ||
+        errorKind === 'auth' ||
+        err instanceof ApiKeyUnavailableError
+      );
 
-      if (!isRetryableAiError(err) || attempt >= retryCount) {
+      if ((!isRetryableAiError(err) && !canSwitchKey) || attempt >= effectiveRetryCount) {
         throw err;
       }
 
-      const backoff = retryDelayMs * Math.pow(2, attempt);
-      const jitter = Math.floor(Math.random() * Math.min(1000, retryDelayMs));
-      await sleep(backoff + jitter);
+      if (pool.hasAvailableKey()) {
+        const isKeySwitch = errorKind === 'quota-limit' || errorKind === 'auth' || err instanceof ApiKeyUnavailableError;
+        const backoff = isKeySwitch ? 250 : retryDelayMs * Math.pow(2, attempt);
+        const jitter = Math.floor(Math.random() * Math.min(1000, retryDelayMs));
+        await sleep(backoff + jitter);
+      }
     }
   }
 
@@ -316,6 +451,35 @@ const parsedQuestionToQuestion = (parsed: ParsedQuestion, sourceFile: string, ex
   };
 };
 
+const getApiKeyStatusText = (status: ApiKeyDisplayStatus): string => {
+  if (status.state === 'running') return 'Dang dung';
+  if (status.state === 'limited') return 'Bi limit/quota - can thay hoac doi reset';
+  if (status.state === 'invalid') return 'Key loi/khong hop le';
+  if (status.state === 'error') return 'Loi tam thoi';
+  return 'San sang';
+};
+
+const getApiKeyStatusClass = (status: ApiKeyDisplayStatus): string => {
+  if (status.state === 'limited' || status.state === 'invalid') {
+    return 'border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-950 dark:text-red-200';
+  }
+
+  if (status.state === 'error') {
+    return 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200';
+  }
+
+  if (status.state === 'running') {
+    return 'border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-700 dark:bg-sky-950 dark:text-sky-200';
+  }
+
+  return 'border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-200';
+};
+
+const getCompactError = (message?: string): string => {
+  if (!message) return '';
+  return message.length > 120 ? `${message.slice(0, 117)}...` : message;
+};
+
 const App: React.FC = () => {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -330,6 +494,7 @@ const App: React.FC = () => {
   const [retryCount, setRetryCount] = useState<number>(() => getStorageNumber(RETRY_COUNT_STORAGE_KEY, 3));
   const [retryDelayMs, setRetryDelayMs] = useState<number>(() => getStorageNumber(RETRY_DELAY_STORAGE_KEY, 4000));
   const [solveConcurrency, setSolveConcurrency] = useState<number>(4);
+  const [solveBatchSize, setSolveBatchSize] = useState<number>(() => getStorageNumber(SOLVE_BATCH_SIZE_STORAGE_KEY, 5));
   const [useSearch, setUseSearch] = useState<boolean>(true);
   const [inputSplitMode, setInputSplitMode] = useState<InputSplitMode>(() =>
     getStorageOption<InputSplitMode>(SPLIT_MODE_STORAGE_KEY, 'questions', ['none', 'questions', 'sections'])
@@ -343,6 +508,7 @@ const App: React.FC = () => {
   const [quickAnswers, setQuickAnswers] = useState<string>('');
   const [quickCheckboxAnswers, setQuickCheckboxAnswers] = useState<string>('');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [apiKeyStatuses, setApiKeyStatuses] = useState<ApiKeyDisplayStatus[]>([]);
 
   const isBusy = isProcessing || isSolving || isImporting;
   const apiKeys = useMemo(() => parseApiKeys(apiKey), [apiKey]);
@@ -352,6 +518,10 @@ const App: React.FC = () => {
     () => buildExportGroups(questions, exportSplitMode, exportQuestionsPerFile, exportBaseName),
     [questions, exportSplitMode, exportQuestionsPerFile, exportBaseName]
   );
+
+  useEffect(() => {
+    setApiKeyStatuses(apiKeys.map(createApiKeyStatus));
+  }, [apiKeys]);
 
   useEffect(() => {
     if (apiKey.trim()) {
@@ -376,6 +546,10 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem(RETRY_DELAY_STORAGE_KEY, String(retryDelayMs));
   }, [retryDelayMs]);
+
+  useEffect(() => {
+    localStorage.setItem(SOLVE_BATCH_SIZE_STORAGE_KEY, String(solveBatchSize));
+  }, [solveBatchSize]);
 
   useEffect(() => {
     localStorage.setItem(SPLIT_MODE_STORAGE_KEY, inputSplitMode);
@@ -525,7 +699,7 @@ const App: React.FC = () => {
         return;
       }
 
-      const apiPool = createApiKeyPool(apiKeys, apiDelayMs);
+      const apiPool = createApiKeyPool(apiKeys, apiDelayMs, setApiKeyStatuses);
       const groups = await runWithConcurrency<ParseTask, Question[]>(
         parseTasks,
         solveConcurrency,
@@ -624,67 +798,95 @@ const App: React.FC = () => {
 
     const snapshot = questions.map(question => ({ ...question }));
     const failures: string[] = [];
+    const solveTasks: SolveTask[] = snapshot.map((question, index) => ({
+      id: `q${index + 1}`,
+      index,
+      question,
+    }));
+    const solveBatches = chunkArray(solveTasks, Math.max(1, solveBatchSize));
 
     setQuestions(prev => prev.map(question => ({ ...question, isSolving: true, isSolved: false })));
 
-    const apiPool = createApiKeyPool(apiKeys, apiDelayMs);
+    const apiPool = createApiKeyPool(apiKeys, apiDelayMs, setApiKeyStatuses);
 
-    await runWithConcurrency<number, void>(
-      snapshot.map((_, index) => index),
+    await runWithConcurrency<SolveTask[], void>(
+      solveBatches,
       solveConcurrency,
-      async (index: number) => {
-        const question = snapshot[index];
-
+      async (batch) => {
         try {
-          const result = await runAiWithRetries(
+          const results = await runAiWithRetries(
             apiPool,
-            requestApiKey => solveQuestionWithSearch({
-              questionText: question.questionText,
-              options: question.options,
-              questionType: question.questionType,
-            }, requestApiKey, { useSearch, model: aiModel }),
+            requestApiKey => solveQuestionsWithSearch(
+              batch.map(task => ({
+                id: task.id,
+                questionText: task.question.questionText,
+                options: task.question.options,
+                questionType: task.question.questionType,
+              })),
+              requestApiKey,
+              { useSearch, model: aiModel }
+            ),
             retryCount,
             retryDelayMs
           );
+          const resultMap = new Map(results.map(result => [result.id, result]));
 
           setQuestions(prev => {
             const next = [...prev];
-            const current = next[index];
-            if (!current) return prev;
 
-            if (current.questionType === QuestionType.FillInTheBlank) {
-              const updatedOptions = [...current.options];
-              if (updatedOptions.length === 0) {
-                updatedOptions.push(result.correctAnswer);
+            batch.forEach(task => {
+              const current = next[task.index];
+              const result = resultMap.get(task.id);
+              if (!current || !result) return;
+
+              if (current.questionType === QuestionType.FillInTheBlank) {
+                const updatedOptions = [...current.options];
+                if (updatedOptions.length === 0) {
+                  updatedOptions.push(result.correctAnswer);
+                } else {
+                  updatedOptions[0] = result.correctAnswer;
+                }
+
+                next[task.index] = {
+                  ...current,
+                  options: updatedOptions,
+                  correctAnswer: '1',
+                  answerExplanation: result.explanation,
+                  isSolving: false,
+                  isSolved: true,
+                };
               } else {
-                updatedOptions[0] = result.correctAnswer;
+                next[task.index] = {
+                  ...current,
+                  correctAnswer: result.correctAnswer,
+                  answerExplanation: result.explanation,
+                  isSolving: false,
+                  isSolved: true,
+                };
               }
-
-              next[index] = {
-                ...current,
-                options: updatedOptions,
-                correctAnswer: '1',
-                answerExplanation: result.explanation,
-                isSolving: false,
-                isSolved: true,
-              };
-            } else {
-              next[index] = {
-                ...current,
-                correctAnswer: result.correctAnswer,
-                answerExplanation: result.explanation,
-                isSolving: false,
-                isSolved: true,
-              };
-            }
+            });
 
             return next;
           });
+
+          const missing = batch.filter(task => !resultMap.has(task.id));
+          if (missing.length > 0) {
+            failures.push(...missing.map(task => `Cau ${task.index + 1}: AI khong tra ve dap an`));
+            setQuestions(prev => {
+              const next = [...prev];
+              missing.forEach(task => {
+                if (next[task.index]) next[task.index] = { ...next[task.index], isSolving: false };
+              });
+              return next;
+            });
+          }
         } catch (err) {
-          failures.push(`Cau ${index + 1}: ${getErrorMessage(err) || 'AI loi'}`);
+          failures.push(...batch.map(task => `Cau ${task.index + 1}: ${getErrorMessage(err) || 'AI loi'}`));
           setQuestions(prev => {
             const next = [...prev];
-            if (next[index]) next[index] = { ...next[index], isSolving: false };
+            batch.forEach(task => {
+              if (next[task.index]) next[task.index] = { ...next[task.index], isSolving: false };
+            });
             return next;
           });
         }
@@ -769,6 +971,26 @@ const App: React.FC = () => {
                 <p className={`mt-2 text-sm ${hasApiKey ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
                   {hasApiKey ? `${apiKeys.length} API key ready, xoay vong tu dong` : 'Can nhap API key de dung AI'}
                 </p>
+                {apiKeyStatuses.length > 0 && (
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {apiKeyStatuses.map(status => (
+                      <div key={status.index} className={`rounded-lg border px-3 py-2 text-xs ${getApiKeyStatusClass(status)}`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold">{status.label}</span>
+                          <span className="whitespace-nowrap">{getApiKeyStatusText(status)}</span>
+                        </div>
+                        <div className="mt-1 text-[11px] opacity-80">
+                          OK {status.successCount} / Loi {status.failureCount}
+                        </div>
+                        {status.lastError && (
+                          <div className="mt-1 text-[11px] break-words opacity-90">
+                            {getCompactError(status.lastError)}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -811,7 +1033,7 @@ const App: React.FC = () => {
                 </label>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <label className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
                   <input
                     type="checkbox"
@@ -829,6 +1051,17 @@ const App: React.FC = () => {
                     max={16}
                     value={solveConcurrency}
                     onChange={(event) => setSolveConcurrency(Math.max(1, Math.min(16, Number(event.target.value) || 1)))}
+                    className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600"
+                  />
+                </label>
+                <label className="p-3 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <span className="block text-sm font-semibold mb-2">Cau/key/lan giai</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={solveBatchSize}
+                    onChange={(event) => setSolveBatchSize(Math.max(1, Math.min(20, Number(event.target.value) || 1)))}
                     className="w-full p-2 border rounded bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600"
                   />
                 </label>

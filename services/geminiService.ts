@@ -8,6 +8,19 @@ type GeminiRequestOptions = {
     useSearch?: boolean;
 };
 
+type SolveQuestionInput = {
+    id: string;
+    questionText: string;
+    options: string[];
+    questionType: QuestionType;
+};
+
+export type SolvedQuestionResult = {
+    id: string;
+    correctAnswer: string;
+    explanation: string;
+};
+
 const getEffectiveModel = (model?: string): string =>
     (model || DEFAULT_GEMINI_MODEL).trim() || DEFAULT_GEMINI_MODEL;
 
@@ -99,6 +112,90 @@ export const parseQuizFromFile = async (
         console.error("Failed to parse Gemini response as JSON:", e);
         console.error("Raw response text:", response.text);
         throw new Error("The AI returned an invalid data format. Please try a clearer document.");
+    }
+};
+
+export const solveQuestionsWithSearch = async (
+    questions: SolveQuestionInput[],
+    apiKey?: string,
+    options?: GeminiRequestOptions
+): Promise<SolvedQuestionResult[]> => {
+    if (questions.length === 0) return [];
+
+    const ai = new GoogleGenAI({ apiKey: getEffectiveApiKey(apiKey) });
+    const shouldUseSearch = options?.useSearch ?? true;
+    const questionBlocks = questions.map((question, index) => {
+        const isFillIn = question.questionType === QuestionType.FillInTheBlank;
+
+        return `Question ${index + 1}
+id: ${question.id}
+Text: ${question.questionText}
+Type: ${question.questionType}
+${!isFillIn && question.options.length > 0 ? `Options:
+${question.options.map((opt, i) => `${i + 1}. ${opt}`).join('\n')}` : 'Options: none'}`;
+    }).join('\n\n---\n\n');
+
+    const prompt = `Solve these quiz questions${shouldUseSearch ? ' using Google Search to ensure accuracy' : ' as quickly as possible'}.
+
+${questionBlocks}
+
+Rules for solving:
+1. For Multiple Choice: provide the number of the correct option (e.g. "1", "2").
+2. For Checkbox: provide a comma-separated list of correct option numbers (e.g. "1,3").
+3. For Fill-in-the-Blank: provide the actual answer text, not an option number.
+4. Provide a clear, concise explanation in Vietnamese.
+5. Return exactly one answer for each input question. Keep each id unchanged.
+
+Return JSON with this shape:
+{
+  "answers": [
+    {
+      "id": "string",
+      "correctAnswer": "string",
+      "explanation": "string"
+    }
+  ]
+}`;
+
+    const response = await ai.models.generateContent({
+        model: getEffectiveModel(options?.model),
+        contents: prompt,
+        ...(shouldUseSearch ? { tools: [{ googleSearch: {} }] } : {}),
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    answers: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                id: { type: Type.STRING },
+                                correctAnswer: { type: Type.STRING },
+                                explanation: { type: Type.STRING }
+                            },
+                            required: ["id", "correctAnswer", "explanation"]
+                        }
+                    }
+                },
+                required: ["answers"]
+            }
+        }
+    });
+
+    try {
+        const result = JSON.parse(response.text);
+        const answers = Array.isArray(result.answers) ? result.answers : [];
+
+        return answers.map((answer: any) => ({
+            id: String(answer.id || ""),
+            correctAnswer: String(answer.correctAnswer || ""),
+            explanation: String(answer.explanation || "")
+        })).filter((answer: SolvedQuestionResult) => answer.id);
+    } catch (e) {
+        console.error("Failed to solve questions with AI:", e);
+        throw new Error("AI failed to solve these questions.");
     }
 };
 
