@@ -1,5 +1,5 @@
 import { Question, QuestionType } from '../types';
-import { makeExportBaseName, sanitizeFileName } from './xlsxExporter';
+import { makeExportBaseName, sanitizeFileName } from './fileName';
 
 type HtmlQuizOption = {
     label: string;

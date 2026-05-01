@@ -1,7 +1,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ParsedQuestion, QuestionType } from '../types';
+import { DEFAULT_GEMINI_MODEL } from './geminiConstants';
 
-export const DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview";
+export { DEFAULT_GEMINI_MODEL };
 
 type GeminiRequestOptions = {
     model?: string;

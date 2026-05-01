@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import { Question, QuestionType } from '../types';
 
 type HtmlSlideOption = {
@@ -52,6 +51,7 @@ const normalizeHeader = (value: unknown): string =>
 const asString = (value: unknown): string => String(value ?? '').trim();
 
 export const importQuestionsFromXlsx = async (file: File): Promise<Question[]> => {
+    const XLSX = await import('xlsx');
     const buffer = await file.arrayBuffer();
     const workbook = XLSX.read(buffer, { type: 'array' });
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];

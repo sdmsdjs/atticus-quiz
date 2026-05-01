@@ -1,14 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Question, QuestionType, ParsedQuestion } from './types';
-import { DEFAULT_GEMINI_MODEL, parseQuizFromFile, solveQuestionsWithSearch } from './services/geminiService';
-import { exportToXlsx, makeExportBaseName, sanitizeFileName } from './utils/xlsxExporter';
-import { createHtmlPreviewUrl, exportToHtml } from './utils/htmlExporter';
-import { importOutputQuestions } from './utils/quizImporter';
+import { DEFAULT_GEMINI_MODEL } from './services/geminiConstants';
+import { makeExportBaseName, sanitizeFileName } from './utils/fileName';
 import FileUpload from './components/FileUpload';
 import QuestionTable from './components/QuestionTable';
 import { MagicWandIcon, DownloadIcon, UploadIcon } from './components/icons';
-
-declare var mammoth: any;
 
 const DOCX_ACCEPT = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx';
 const OUTPUT_ACCEPT = '.xlsx,.xls,.html,.htm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/html';
@@ -23,6 +19,56 @@ const QUESTIONS_PER_CHUNK_STORAGE_KEY = 'quiz-helper-questions-per-chunk';
 const SECTIONS_PER_CHUNK_STORAGE_KEY = 'quiz-helper-sections-per-chunk';
 const EXPORT_SPLIT_MODE_STORAGE_KEY = 'quiz-helper-export-split-mode';
 const EXPORT_QUESTIONS_PER_FILE_STORAGE_KEY = 'quiz-helper-export-questions-per-file';
+const MAMMOTH_CDN_URL = 'https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js';
+
+type MammothBrowser = {
+  extractRawText: (input: { arrayBuffer: ArrayBuffer }) => Promise<{ value?: string }>;
+};
+
+declare global {
+  interface Window {
+    mammoth?: MammothBrowser;
+  }
+}
+
+let mammothPromise: Promise<MammothBrowser> | null = null;
+
+const loadMammoth = (): Promise<MammothBrowser> => {
+  if (window.mammoth) return Promise.resolve(window.mammoth);
+  if (mammothPromise) return mammothPromise;
+
+  mammothPromise = new Promise((resolve, reject) => {
+    const existingScript = document.querySelector<HTMLScriptElement>(`script[src="${MAMMOTH_CDN_URL}"]`);
+
+    const finish = () => {
+      if (window.mammoth) resolve(window.mammoth);
+      else {
+        mammothPromise = null;
+        reject(new Error('Khong tai duoc Mammoth de doc file DOCX.'));
+      }
+    };
+
+    const fail = () => {
+      mammothPromise = null;
+      reject(new Error('Khong tai duoc Mammoth de doc file DOCX.'));
+    };
+
+    if (existingScript) {
+      existingScript.addEventListener('load', finish, { once: true });
+      existingScript.addEventListener('error', fail, { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = MAMMOTH_CDN_URL;
+    script.async = true;
+    script.onload = finish;
+    script.onerror = fail;
+    document.head.appendChild(script);
+  });
+
+  return mammothPromise;
+};
 
 type InputSplitMode = 'none' | 'questions' | 'sections';
 type ExportSplitMode = 'none' | 'questionCount' | 'sourceFile' | 'processingChunk';
@@ -428,6 +474,7 @@ const buildExportGroups = (
 };
 
 const readDocxText = async (file: File): Promise<string> => {
+  const mammoth = await loadMammoth();
   const arrayBuffer = await file.arrayBuffer();
   const result = await mammoth.extractRawText({ arrayBuffer });
   return result.value || '';
@@ -666,6 +713,7 @@ const App: React.FC = () => {
     const failures: string[] = [];
 
     try {
+      const { parseQuizFromFile } = await import('./services/geminiService');
       const textGroups = await runWithConcurrency<File, ParseTask[]>(selectedFiles, 4, async (file: File) => {
         try {
           const fileText = await readDocxText(file);
@@ -733,6 +781,8 @@ const App: React.FC = () => {
           setError(`Da nap ${mergedQuestions.length} cau, nhung co ${failures.length} file loi: ${failures.join(' | ')}`);
         }
       }
+    } catch (err) {
+      setError(getErrorMessage(err) || 'Khong the xu ly file DOCX.');
     } finally {
       setIsProcessing(false);
     }
@@ -751,6 +801,7 @@ const App: React.FC = () => {
     const failures: string[] = [];
 
     try {
+      const { importOutputQuestions } = await import('./utils/quizImporter');
       const groups = await runWithConcurrency<File, Question[]>(files, 4, async (file: File) => {
         try {
           return await importOutputQuestions(file);
@@ -771,6 +822,8 @@ const App: React.FC = () => {
       } else if (importedQuestions.length === 0) {
         setError('Khong tim thay cau hoi trong file output vua chon.');
       }
+    } catch (err) {
+      setError(getErrorMessage(err) || 'Khong the import file output.');
     } finally {
       setIsImporting(false);
     }
@@ -807,119 +860,140 @@ const App: React.FC = () => {
 
     setQuestions(prev => prev.map(question => ({ ...question, isSolving: true, isSolved: false })));
 
-    const apiPool = createApiKeyPool(apiKeys, apiDelayMs, setApiKeyStatuses);
+    try {
+      const { solveQuestionsWithSearch } = await import('./services/geminiService');
+      const apiPool = createApiKeyPool(apiKeys, apiDelayMs, setApiKeyStatuses);
 
-    await runWithConcurrency<SolveTask[], void>(
-      solveBatches,
-      solveConcurrency,
-      async (batch) => {
-        try {
-          const results = await runAiWithRetries(
-            apiPool,
-            requestApiKey => solveQuestionsWithSearch(
-              batch.map(task => ({
-                id: task.id,
-                questionText: task.question.questionText,
-                options: task.question.options,
-                questionType: task.question.questionType,
-              })),
-              requestApiKey,
-              { useSearch, model: aiModel }
-            ),
-            retryCount,
-            retryDelayMs
-          );
-          const resultMap = new Map(results.map(result => [result.id, result]));
+      await runWithConcurrency<SolveTask[], void>(
+        solveBatches,
+        solveConcurrency,
+        async (batch) => {
+          try {
+            const results = await runAiWithRetries(
+              apiPool,
+              requestApiKey => solveQuestionsWithSearch(
+                batch.map(task => ({
+                  id: task.id,
+                  questionText: task.question.questionText,
+                  options: task.question.options,
+                  questionType: task.question.questionType,
+                })),
+                requestApiKey,
+                { useSearch, model: aiModel }
+              ),
+              retryCount,
+              retryDelayMs
+            );
+            const resultMap = new Map(results.map(result => [result.id, result]));
 
-          setQuestions(prev => {
-            const next = [...prev];
-
-            batch.forEach(task => {
-              const current = next[task.index];
-              const result = resultMap.get(task.id);
-              if (!current || !result) return;
-
-              if (current.questionType === QuestionType.FillInTheBlank) {
-                const updatedOptions = [...current.options];
-                if (updatedOptions.length === 0) {
-                  updatedOptions.push(result.correctAnswer);
-                } else {
-                  updatedOptions[0] = result.correctAnswer;
-                }
-
-                next[task.index] = {
-                  ...current,
-                  options: updatedOptions,
-                  correctAnswer: '1',
-                  answerExplanation: result.explanation,
-                  isSolving: false,
-                  isSolved: true,
-                };
-              } else {
-                next[task.index] = {
-                  ...current,
-                  correctAnswer: result.correctAnswer,
-                  answerExplanation: result.explanation,
-                  isSolving: false,
-                  isSolved: true,
-                };
-              }
-            });
-
-            return next;
-          });
-
-          const missing = batch.filter(task => !resultMap.has(task.id));
-          if (missing.length > 0) {
-            failures.push(...missing.map(task => `Cau ${task.index + 1}: AI khong tra ve dap an`));
             setQuestions(prev => {
               const next = [...prev];
-              missing.forEach(task => {
+
+              batch.forEach(task => {
+                const current = next[task.index];
+                const result = resultMap.get(task.id);
+                if (!current || !result) return;
+
+                if (current.questionType === QuestionType.FillInTheBlank) {
+                  const updatedOptions = [...current.options];
+                  if (updatedOptions.length === 0) {
+                    updatedOptions.push(result.correctAnswer);
+                  } else {
+                    updatedOptions[0] = result.correctAnswer;
+                  }
+
+                  next[task.index] = {
+                    ...current,
+                    options: updatedOptions,
+                    correctAnswer: '1',
+                    answerExplanation: result.explanation,
+                    isSolving: false,
+                    isSolved: true,
+                  };
+                } else {
+                  next[task.index] = {
+                    ...current,
+                    correctAnswer: result.correctAnswer,
+                    answerExplanation: result.explanation,
+                    isSolving: false,
+                    isSolved: true,
+                  };
+                }
+              });
+
+              return next;
+            });
+
+            const missing = batch.filter(task => !resultMap.has(task.id));
+            if (missing.length > 0) {
+              failures.push(...missing.map(task => `Cau ${task.index + 1}: AI khong tra ve dap an`));
+              setQuestions(prev => {
+                const next = [...prev];
+                missing.forEach(task => {
+                  if (next[task.index]) next[task.index] = { ...next[task.index], isSolving: false };
+                });
+                return next;
+              });
+            }
+          } catch (err) {
+            failures.push(...batch.map(task => `Cau ${task.index + 1}: ${getErrorMessage(err) || 'AI loi'}`));
+            setQuestions(prev => {
+              const next = [...prev];
+              batch.forEach(task => {
                 if (next[task.index]) next[task.index] = { ...next[task.index], isSolving: false };
               });
               return next;
             });
           }
-        } catch (err) {
-          failures.push(...batch.map(task => `Cau ${task.index + 1}: ${getErrorMessage(err) || 'AI loi'}`));
-          setQuestions(prev => {
-            const next = [...prev];
-            batch.forEach(task => {
-              if (next[task.index]) next[task.index] = { ...next[task.index], isSolving: false };
-            });
-            return next;
-          });
         }
+      );
+
+      if (failures.length > 0) {
+        setError(`${failures.length} cau chua giai duoc. ${failures.slice(0, 4).join(' | ')}`);
       }
-    );
-
-    if (failures.length > 0) {
-      setError(`${failures.length} cau chua giai duoc. ${failures.slice(0, 4).join(' | ')}`);
+    } catch (err) {
+      setError(getErrorMessage(err) || 'Khong the tai cong cu giai AI.');
+      setQuestions(prev => prev.map(question => ({ ...question, isSolving: false })));
+    } finally {
+      setIsSolving(false);
     }
-
-    setIsSolving(false);
   };
 
-  const handlePreviewHtml = () => {
+  const handlePreviewHtml = async () => {
     if (questions.length === 0) return;
     const previewGroup = exportGroups[0] || { name: exportBaseName, questions };
-    setPreviewUrl(createHtmlPreviewUrl(previewGroup.questions, previewGroup.name));
+    try {
+      const { createHtmlPreviewUrl } = await import('./utils/htmlExporter');
+      setPreviewUrl(createHtmlPreviewUrl(previewGroup.questions, previewGroup.name));
+    } catch (err) {
+      setError(getErrorMessage(err) || 'Khong the tao ban xem truoc HTML.');
+    }
   };
 
-  const handleExportHtml = () => {
+  const handleExportHtml = async () => {
     if (questions.length === 0) return;
-    exportGroups.forEach((group, index) => {
-      const suffix = exportGroups.length > 1 ? `-${index + 1}` : '';
-      exportToHtml(group.questions, `${sanitizeFileName(group.name)}${suffix}.html`);
-    });
+    try {
+      const { exportToHtml } = await import('./utils/htmlExporter');
+      exportGroups.forEach((group, index) => {
+        const suffix = exportGroups.length > 1 ? `-${index + 1}` : '';
+        exportToHtml(group.questions, `${sanitizeFileName(group.name)}${suffix}.html`);
+      });
+    } catch (err) {
+      setError(getErrorMessage(err) || 'Khong the xuat HTML.');
+    }
   };
 
-  const handleExportXlsx = () => {
+  const handleExportXlsx = async () => {
     if (questions.length === 0) return;
-    exportGroups.forEach((group, index) => {
-      const suffix = exportGroups.length > 1 ? `-${index + 1}` : '';
-      exportToXlsx(group.questions, `${sanitizeFileName(group.name)}${suffix}.xlsx`);
-    });
+    try {
+      const { exportToXlsx } = await import('./utils/xlsxExporter');
+      exportGroups.forEach((group, index) => {
+        const suffix = exportGroups.length > 1 ? `-${index + 1}` : '';
+        exportToXlsx(group.questions, `${sanitizeFileName(group.name)}${suffix}.xlsx`);
+      });
+    } catch (err) {
+      setError(getErrorMessage(err) || 'Khong the xuat Excel.');
+    }
   };
 
   return (
