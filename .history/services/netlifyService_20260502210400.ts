@@ -266,7 +266,7 @@ export const deployQuizWithDefaultNetlifyToken = async ({
   title,
   siteName,
 }: DeployQuizWithDefaultTokenOptions): Promise<NetlifyDeployResult> => {
-  const response = await fetch('https://atticus-quiz.netlify.app/api/deploy-quiz', {
+  const response = await fetch('/api/deploy-quiz', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
