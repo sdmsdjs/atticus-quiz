@@ -47,6 +47,40 @@ export const DownloadIcon = ({ className }: { className?: string }) => (
     </svg>
 );
 
+export const CloudUploadIcon = ({ className }: { className?: string }) => (
+    <svg
+        xmlns="http://www.w3.org/2000/svg"
+        className={className}
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2}
+    >
+        <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 16V8m0 0l-3 3m3-3l3 3M7 16.5a4.5 4.5 0 111.4-8.78A5.5 5.5 0 0119.5 12a3.5 3.5 0 01-.5 6.96H7"
+        />
+    </svg>
+);
+
+export const ExternalLinkIcon = ({ className }: { className?: string }) => (
+    <svg
+        xmlns="http://www.w3.org/2000/svg"
+        className={className}
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2}
+    >
+        <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M13.5 6H18m0 0v4.5M18 6l-7.5 7.5M6 8.5V18h9.5"
+        />
+    </svg>
+);
+
 export const DocumentIcon = ({ className }: { className?: string }) => (
     <svg 
       xmlns="http://www.w3.org/2000/svg" 

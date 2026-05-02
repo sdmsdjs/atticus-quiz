@@ -23,6 +23,7 @@ Dự án phù hợp cho giáo viên, người biên soạn đề, hoặc ngườ
   - `.xlsx`
   - `.html`
 - Xem trước bản HTML trước khi tải xuống.
+- Tạo site Netlify và link công khai cho bài quiz HTML.
 
 ## Công nghệ sử dụng
 
@@ -32,6 +33,7 @@ Dự án phù hợp cho giáo viên, người biên soạn đề, hoặc ngườ
 - Gemini API thông qua `@google/genai`
 - `xlsx` để xuất file Excel
 - `mammoth` để đọc nội dung từ file DOCX trên trình duyệt
+- Netlify API để tạo site và deploy bài quiz HTML
 
 ## Yêu cầu hệ thống
 
@@ -232,12 +234,36 @@ Các chế độ chia file xuất:
 - Chia theo file nguồn.
 - Chia theo nhóm xử lý.
 
+### 13. Tạo link Netlify
+
+Sau khi có danh sách câu hỏi, có thể tạo site Netlify trực tiếp từ bản HTML quiz:
+
+1. Bấm `Create Link`.
+2. Chọn `Bài deploy` nếu output đang được chia thành nhiều file.
+3. Mở `Settings` nếu muốn đổi `Site slug` hoặc dùng token riêng.
+4. Chờ Netlify trả về trạng thái `ready`.
+
+Ứng dụng tạo một Netlify site mới, deploy file `index.html`, sau đó hiển thị link công khai dạng `https://<site>.netlify.app`.
+
+Mặc định, nút `Create Link` dùng Netlify token được cấu hình ở server bằng biến môi trường `NETLIFY_ACCESS_TOKEN`. Không đưa token này vào code frontend, không đặt trong biến `VITE_*`, và không commit vào GitHub.
+
+Nếu deploy app này lên Netlify, cấu hình token mặc định như sau:
+
+1. Vào `https://app.netlify.com/user/applications#personal-access-tokens` để tạo personal access token.
+2. Vào site Netlify đang host app này.
+3. Mở `Site configuration` → `Environment variables`.
+4. Thêm biến `NETLIFY_ACCESS_TOKEN` với token thật.
+5. Deploy lại app.
+
+Khi chạy local chỉ bằng `npm run dev`, Netlify Function mặc định không chạy. Có thể chuyển `Settings` → `Cách deploy` sang `Token riêng của người dùng`, hoặc chạy bằng Netlify CLI nếu muốn test đường server-side.
+
 ## Cấu trúc thư mục
 
 ```text
 atticus-quiz/
 ├── components/          # Các component giao diện
-├── services/            # Logic gọi Gemini API và xử lý AI
+├── services/            # Logic gọi Gemini / Netlify API và xử lý AI
+├── netlify/functions/   # Netlify Function giữ token mặc định ở server
 ├── utils/               # Hàm import / export XLSX, HTML
 ├── App.tsx              # Component chính của ứng dụng
 ├── index.tsx            # Entry point React
@@ -259,10 +285,14 @@ atticus-quiz/
 
 ## Lưu ý bảo mật
 
-- Không commit file `.env.local` lên GitHub.
+- Không commit file `.env`, `.env.local` hoặc bất kỳ file env thật nào lên GitHub.
 - Không chia sẻ Gemini API key công khai.
+- Không chia sẻ Netlify personal access token công khai.
 - Nếu API key bị lộ, hãy thu hồi và tạo key mới.
+- Không đặt Netlify token vào biến `VITE_*`; các biến này sẽ bị đóng gói vào frontend.
 - Khi nhập API key trên giao diện, key có thể được lưu trong `localStorage` của trình duyệt.
+- Khi nhập Netlify token trên giao diện, token cũng có thể được lưu trong `localStorage` của trình duyệt.
+- Với token mặc định, token thật chỉ nên nằm trong biến môi trường server `NETLIFY_ACCESS_TOKEN`.
 
 ## Xử lý lỗi thường gặp
 
@@ -335,4 +365,3 @@ Dự án hiện chưa khai báo license. Nếu muốn công khai mã nguồn, n�
 ## Tác giả
 
 Dự án được phát triển bởi `sdmsdjs`.
-

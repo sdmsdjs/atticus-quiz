@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Question, QuestionType, ParsedQuestion } from './types';
+import type { NetlifyDeployResult } from './services/netlifyService';
 import { DEFAULT_GEMINI_MODEL } from './services/geminiConstants';
 import { makeExportBaseName, sanitizeFileName } from './utils/fileName';
 import FileUpload from './components/FileUpload';
 import QuestionTable from './components/QuestionTable';
-import { MagicWandIcon, DownloadIcon, UploadIcon } from './components/icons';
+import { MagicWandIcon, DownloadIcon, UploadIcon, CloudUploadIcon, ExternalLinkIcon } from './components/icons';
 
 const DOCX_ACCEPT = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx';
 const OUTPUT_ACCEPT = '.xlsx,.xls,.html,.htm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/html';
@@ -19,6 +20,9 @@ const QUESTIONS_PER_CHUNK_STORAGE_KEY = 'quiz-helper-questions-per-chunk';
 const SECTIONS_PER_CHUNK_STORAGE_KEY = 'quiz-helper-sections-per-chunk';
 const EXPORT_SPLIT_MODE_STORAGE_KEY = 'quiz-helper-export-split-mode';
 const EXPORT_QUESTIONS_PER_FILE_STORAGE_KEY = 'quiz-helper-export-questions-per-file';
+const NETLIFY_TOKEN_STORAGE_KEY = 'quiz-helper-netlify-token';
+const NETLIFY_SITE_NAME_STORAGE_KEY = 'quiz-helper-netlify-site-name';
+const NETLIFY_DEPLOY_MODE_STORAGE_KEY = 'quiz-helper-netlify-deploy-mode';
 const MAMMOTH_CDN_URL = 'https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js';
 
 type MammothBrowser = {
@@ -72,6 +76,7 @@ const loadMammoth = (): Promise<MammothBrowser> => {
 
 type InputSplitMode = 'none' | 'questions' | 'sections';
 type ExportSplitMode = 'none' | 'questionCount' | 'sourceFile' | 'processingChunk';
+type NetlifyDeployMode = 'default' | 'custom';
 
 type TextChunk = {
   label: string;
@@ -532,11 +537,21 @@ const App: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isSolving, setIsSolving] = useState<boolean>(false);
   const [isImporting, setIsImporting] = useState<boolean>(false);
+  const [isDeployingNetlify, setIsDeployingNetlify] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem(API_KEY_STORAGE_KEY) || '');
   const [aiModel, setAiModel] = useState<string>(() => localStorage.getItem(AI_MODEL_STORAGE_KEY) || DEFAULT_GEMINI_MODEL);
   const [showApiKey, setShowApiKey] = useState<boolean>(false);
+  const [netlifyToken, setNetlifyToken] = useState<string>(() => localStorage.getItem(NETLIFY_TOKEN_STORAGE_KEY) || '');
+  const [netlifySiteName, setNetlifySiteName] = useState<string>(() => localStorage.getItem(NETLIFY_SITE_NAME_STORAGE_KEY) || '');
+  const [showNetlifyToken, setShowNetlifyToken] = useState<boolean>(false);
+  const [showNetlifySettings, setShowNetlifySettings] = useState<boolean>(false);
+  const [netlifyDeployMode, setNetlifyDeployMode] = useState<NetlifyDeployMode>(() =>
+    getStorageOption<NetlifyDeployMode>(NETLIFY_DEPLOY_MODE_STORAGE_KEY, 'default', ['default', 'custom'])
+  );
+  const [netlifyGroupIndex, setNetlifyGroupIndex] = useState<number>(0);
+  const [netlifyResult, setNetlifyResult] = useState<NetlifyDeployResult | null>(null);
   const [apiDelayMs, setApiDelayMs] = useState<number>(() => getStorageNumber(API_DELAY_STORAGE_KEY, 1500));
   const [retryCount, setRetryCount] = useState<number>(() => getStorageNumber(RETRY_COUNT_STORAGE_KEY, 3));
   const [retryDelayMs, setRetryDelayMs] = useState<number>(() => getStorageNumber(RETRY_DELAY_STORAGE_KEY, 4000));
@@ -557,14 +572,16 @@ const App: React.FC = () => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [apiKeyStatuses, setApiKeyStatuses] = useState<ApiKeyDisplayStatus[]>([]);
 
-  const isBusy = isProcessing || isSolving || isImporting;
+  const isBusy = isProcessing || isSolving || isImporting || isDeployingNetlify;
   const apiKeys = useMemo(() => parseApiKeys(apiKey), [apiKey]);
   const hasApiKey = apiKeys.length > 0;
+  const hasCustomNetlifyToken = netlifyToken.trim().length > 0;
   const exportBaseName = useMemo(() => makeExportBaseName(questions), [questions]);
   const exportGroups = useMemo(
     () => buildExportGroups(questions, exportSplitMode, exportQuestionsPerFile, exportBaseName),
     [questions, exportSplitMode, exportQuestionsPerFile, exportBaseName]
   );
+  const selectedNetlifyGroup = exportGroups[netlifyGroupIndex] || exportGroups[0] || null;
 
   useEffect(() => {
     setApiKeyStatuses(apiKeys.map(createApiKeyStatus));
@@ -577,6 +594,26 @@ const App: React.FC = () => {
       localStorage.removeItem(API_KEY_STORAGE_KEY);
     }
   }, [apiKey]);
+
+  useEffect(() => {
+    if (netlifyToken.trim()) {
+      localStorage.setItem(NETLIFY_TOKEN_STORAGE_KEY, netlifyToken.trim());
+    } else {
+      localStorage.removeItem(NETLIFY_TOKEN_STORAGE_KEY);
+    }
+  }, [netlifyToken]);
+
+  useEffect(() => {
+    if (netlifySiteName.trim()) {
+      localStorage.setItem(NETLIFY_SITE_NAME_STORAGE_KEY, netlifySiteName.trim());
+    } else {
+      localStorage.removeItem(NETLIFY_SITE_NAME_STORAGE_KEY);
+    }
+  }, [netlifySiteName]);
+
+  useEffect(() => {
+    localStorage.setItem(NETLIFY_DEPLOY_MODE_STORAGE_KEY, netlifyDeployMode);
+  }, [netlifyDeployMode]);
 
   useEffect(() => {
     localStorage.setItem(AI_MODEL_STORAGE_KEY, aiModel.trim() || DEFAULT_GEMINI_MODEL);
@@ -617,6 +654,10 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem(EXPORT_QUESTIONS_PER_FILE_STORAGE_KEY, String(exportQuestionsPerFile));
   }, [exportQuestionsPerFile]);
+
+  useEffect(() => {
+    setNetlifyGroupIndex(prev => Math.min(prev, Math.max(exportGroups.length - 1, 0)));
+  }, [exportGroups.length]);
 
   useEffect(() => {
     return () => {
@@ -996,6 +1037,53 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDeployNetlify = async () => {
+    if (questions.length === 0) return;
+
+    if (netlifyDeployMode === 'custom' && !hasCustomNetlifyToken) {
+      setError('Hay nhap Netlify personal access token hoac chon dung token mac dinh.');
+      return;
+    }
+
+    const group = selectedNetlifyGroup || { name: exportBaseName, questions };
+
+    if (group.questions.length === 0) {
+      setError('Khong co cau hoi nao de deploy len Netlify.');
+      return;
+    }
+
+    setIsDeployingNetlify(true);
+    setError(null);
+    setNetlifyResult(null);
+
+    try {
+      const [{ buildHtmlDocument }, netlifyService] = await Promise.all([
+        import('./utils/htmlExporter'),
+        import('./services/netlifyService'),
+      ]);
+
+      const html = buildHtmlDocument(group.questions, group.name);
+      const result = netlifyDeployMode === 'custom'
+        ? await netlifyService.deployQuizToNetlify({
+          accessToken: netlifyToken,
+          html,
+          title: group.name,
+          siteName: netlifySiteName,
+        })
+        : await netlifyService.deployQuizWithDefaultNetlifyToken({
+          html,
+          title: group.name,
+          siteName: netlifySiteName,
+        });
+
+      setNetlifyResult(result);
+    } catch (err) {
+      setError(getErrorMessage(err) || 'Khong the tao link Netlify.');
+    } finally {
+      setIsDeployingNetlify(false);
+    }
+  };
+
   return (
     <div className="min-h-screen text-gray-800 dark:text-gray-200 transition-colors duration-300">
       <main className="container mx-auto px-4 py-8">
@@ -1210,6 +1298,116 @@ const App: React.FC = () => {
                   disabled={isBusy}
                 />
               </label>
+
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+                <button
+                  type="button"
+                  onClick={() => setShowNetlifySettings(prev => !prev)}
+                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                >
+                  <span>
+                    <span className="block text-sm font-bold text-gray-800 dark:text-gray-100">Netlify settings</span>
+                    <span className="block text-xs text-gray-500 dark:text-gray-400">
+                      {netlifyDeployMode === 'default' ? 'Dung token mac dinh tren server' : 'Dung token rieng tren trinh duyet'}
+                    </span>
+                  </span>
+                  <span className="text-sm font-semibold text-sky-600 dark:text-sky-400">
+                    {showNetlifySettings ? 'Hide' : 'Open'}
+                  </span>
+                </button>
+
+                {showNetlifySettings && (
+                  <div className="border-t border-gray-200 dark:border-gray-700 p-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label className="block">
+                        <span className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          Cach deploy
+                        </span>
+                        <select
+                          value={netlifyDeployMode}
+                          onChange={(event) => {
+                            setNetlifyDeployMode(event.target.value as NetlifyDeployMode);
+                            setNetlifyResult(null);
+                          }}
+                          className="w-full p-2 border rounded bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-sky-500 focus:border-sky-500 text-sm"
+                        >
+                          <option value="default">Token mac dinh tren server</option>
+                          <option value="custom">Token rieng cua nguoi dung</option>
+                        </select>
+                      </label>
+
+                      <label className="block">
+                        <span className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          Site slug
+                        </span>
+                        <input
+                          type="text"
+                          value={netlifySiteName}
+                          onChange={(event) => setNetlifySiteName(event.target.value)}
+                          placeholder="Auto neu de trong"
+                          className="w-full p-2 border rounded bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-sky-500 focus:border-sky-500 text-sm"
+                        />
+                      </label>
+
+                      {exportGroups.length > 1 && (
+                        <label className="block">
+                          <span className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                            Bai deploy
+                          </span>
+                          <select
+                            value={netlifyGroupIndex}
+                            onChange={(event) => {
+                              setNetlifyGroupIndex(Number(event.target.value) || 0);
+                              setNetlifyResult(null);
+                            }}
+                            className="w-full p-2 border rounded bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-sky-500 focus:border-sky-500 text-sm"
+                          >
+                            {exportGroups.map((group, index) => (
+                              <option key={`${group.name}-${index}`} value={index}>
+                                {group.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+
+                      <label className={`block ${netlifyDeployMode === 'custom' ? '' : 'opacity-60'}`}>
+                        <span className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          Netlify token rieng
+                        </span>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={netlifyToken}
+                            onChange={(event) => setNetlifyToken(event.target.value)}
+                            placeholder="nfp_..."
+                            disabled={netlifyDeployMode !== 'custom'}
+                            style={showNetlifyToken ? undefined : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)}
+                            className="min-w-0 flex-1 p-2 border rounded bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-sky-500 focus:border-sky-500 text-sm disabled:cursor-not-allowed"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowNetlifyToken(prev => !prev)}
+                            disabled={netlifyDeployMode !== 'custom'}
+                            className="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 font-semibold rounded hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                          >
+                            {showNetlifyToken ? 'Hide' : 'Show'}
+                          </button>
+                        </div>
+                        <a
+                          href="https://app.netlify.com/user/applications#personal-access-tokens"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline"
+                        >
+                          Tao PAT
+                          <ExternalLinkIcon className="w-3 h-3" />
+                        </a>
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1334,8 +1532,45 @@ const App: React.FC = () => {
                   <DownloadIcon className="w-5 h-5 mr-2" />
                   Export XLSX
                 </button>
+                <button
+                  onClick={handleDeployNetlify}
+                  disabled={isBusy || questions.length === 0 || (netlifyDeployMode === 'custom' && !hasCustomNetlifyToken)}
+                  className="flex items-center justify-center px-5 py-2 bg-slate-800 text-white font-semibold rounded-lg shadow-md hover:bg-slate-900 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all duration-300"
+                >
+                  <CloudUploadIcon className="w-5 h-5 mr-2" />
+                  {isDeployingNetlify ? 'Deploying...' : 'Create Link'}
+                </button>
               </div>
             </div>
+
+            {netlifyResult && (
+              <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3 rounded-lg bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 p-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-green-700 dark:text-green-200">
+                    {netlifyResult.siteName} - {netlifyResult.state}
+                  </div>
+                  <a
+                    href={netlifyResult.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="break-all text-sky-700 dark:text-sky-300 font-semibold hover:underline"
+                  >
+                    {netlifyResult.url}
+                  </a>
+                </div>
+                {netlifyResult.adminUrl && (
+                  <a
+                    href={netlifyResult.adminUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center justify-center gap-1 px-3 py-2 bg-white dark:bg-gray-800 border border-green-200 dark:border-green-800 rounded text-sm font-semibold text-green-700 dark:text-green-200 hover:bg-green-100 dark:hover:bg-green-900"
+                  >
+                    Dashboard
+                    <ExternalLinkIcon className="w-4 h-4" />
+                  </a>
+                )}
+              </div>
+            )}
 
             <p className="text-gray-500 dark:text-gray-400 mb-6">
               Review and edit the extracted data below.

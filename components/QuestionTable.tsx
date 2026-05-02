@@ -8,17 +8,18 @@ interface QuestionTableProps {
 
 const MAX_EMBEDDED_IMAGE_SIZE = 1600;
 const EMBEDDED_IMAGE_QUALITY = 0.9;
+const optionLabels = ['A', 'B', 'C', 'D', 'E'];
 
 const readFileAsDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onload = () => resolve(String(reader.result || ''));
-  reader.onerror = () => reject(new Error('Không đọc được file ảnh.'));
+  reader.onerror = () => reject(new Error('Khong doc duoc file anh.'));
   reader.readAsDataURL(file);
 });
 
 const resizeImageFileToDataUrl = async (file: File): Promise<string> => {
   if (!file.type.startsWith('image/')) {
-    throw new Error('Hãy chọn đúng file ảnh.');
+    throw new Error('Hay chon dung file anh.');
   }
 
   if (file.type === 'image/gif' || file.type === 'image/svg+xml') {
@@ -31,7 +32,7 @@ const resizeImageFileToDataUrl = async (file: File): Promise<string> => {
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
       const image = new Image();
       image.onload = () => resolve(image);
-      image.onerror = () => reject(new Error('Không xử lý được ảnh này.'));
+      image.onerror = () => reject(new Error('Khong xu ly duoc anh nay.'));
       image.src = objectUrl;
     });
 
@@ -61,8 +62,27 @@ const getEmbeddedImageSizeLabel = (value: string): string => {
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 };
 
+const getTextareaRows = (
+  value: string,
+  minRows: number,
+  maxRows: number,
+  charsPerRow: number
+): number => {
+  const rows = (value || '')
+    .split('\n')
+    .reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / charsPerRow)), 0);
+
+  return Math.max(minRows, Math.min(maxRows, rows));
+};
+
+const getQuestionTypeLabel = (type: QuestionType): string => {
+  if (type === QuestionType.MultipleChoice) return 'Trac nghiem';
+  if (type === QuestionType.Checkbox) return 'Dung/Sai nhieu y';
+  if (type === QuestionType.FillInTheBlank) return 'Dien dap an';
+  return type;
+};
+
 const QuestionTable: React.FC<QuestionTableProps> = ({ questions, onQuestionChange }) => {
-  
   const handleOptionChange = (qIndex: number, optIndex: number, value: string) => {
     const newOptions = [...questions[qIndex].options];
     newOptions[optIndex] = value;
@@ -78,16 +98,11 @@ const QuestionTable: React.FC<QuestionTableProps> = ({ questions, onQuestionChan
     } else if (question.questionType === QuestionType.Checkbox) {
       const currentAnswers = question.correctAnswer.split(',').filter(Boolean);
       const isSelected = currentAnswers.includes(answerIndex);
+      const newAnswers = isSelected
+        ? currentAnswers.filter(a => a !== answerIndex)
+        : [...currentAnswers, answerIndex];
 
-      let newAnswers;
-      if (isSelected) {
-        newAnswers = currentAnswers.filter(a => a !== answerIndex);
-      } else {
-        newAnswers = [...currentAnswers, answerIndex];
-      }
-      
-      newAnswers.sort((a, b) => parseInt(a) - parseInt(b));
-      
+      newAnswers.sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
       onQuestionChange(qIndex, 'correctAnswer', newAnswers.join(','));
     }
   };
@@ -99,7 +114,7 @@ const QuestionTable: React.FC<QuestionTableProps> = ({ questions, onQuestionChan
       const dataUrl = await resizeImageFileToDataUrl(file);
       onQuestionChange(qIndex, 'imageLink', dataUrl);
     } catch (error: any) {
-      window.alert(error?.message || 'Không chèn được ảnh này.');
+      window.alert(error?.message || 'Khong chen duoc anh nay.');
     }
   };
 
@@ -123,123 +138,227 @@ const QuestionTable: React.FC<QuestionTableProps> = ({ questions, onQuestionChan
   };
 
   return (
-    <div className="w-full overflow-x-auto shadow-md rounded-lg">
-      <table className="min-w-full text-sm text-left text-gray-500 dark:text-gray-400">
-        <thead className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
-          <tr>
-            <th scope="col" className="px-6 py-3 min-w-[20rem]">Question Text</th>
-            <th scope="col" className="px-6 py-3">Type</th>
-            <th scope="col" className="px-6 py-3">Option 1</th>
-            <th scope="col" className="px-6 py-3">Option 2</th>
-            <th scope="col" className="px-6 py-3">Option 3</th>
-            <th scope="col" className="px-6 py-3">Option 4</th>
-            <th scope="col" className="px-6 py-3">Option 5</th>
-            <th scope="col" className="px-6 py-3">Correct Answer</th>
-            <th scope="col" className="px-6 py-3 min-w-[18rem]">Image</th>
-            <th scope="col" className="px-6 py-3">Explanation</th>
-            <th scope="col" className="px-6 py-3">Time (s)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {questions.map((q, qIndex) => {
-            const isEmbeddedImage = q.imageLink.startsWith('data:image/');
-            const imageSizeLabel = getEmbeddedImageSizeLabel(q.imageLink);
+    <div className="space-y-4">
+      {questions.map((q, qIndex) => {
+        const selectedAnswers = q.correctAnswer.split(',').filter(Boolean);
+        const isEmbeddedImage = q.imageLink.startsWith('data:image/');
+        const imageSizeLabel = getEmbeddedImageSizeLabel(q.imageLink);
+        const isFillInTheBlank = q.questionType === QuestionType.FillInTheBlank;
 
-            return (
-            <tr key={qIndex} className="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
-              <td className="px-6 py-4">
-                <textarea
-                  value={q.questionText}
-                  onChange={(e) => onQuestionChange(qIndex, 'questionText', e.target.value)}
-                  className="w-full p-1 border rounded bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600"
-                  rows={4}
-                />
-              </td>
-              <td className="px-6 py-4">
-                <select
-                  value={q.questionType}
-                  onChange={(e) => onQuestionChange(qIndex, 'questionType', e.target.value as QuestionType)}
-                  className="w-full p-1 border rounded bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600"
-                >
-                  {Object.values(QuestionType).map(type => (
-                    <option key={type} value={type}>{type}</option>
-                  ))}
-                </select>
-              </td>
-              {Array.from({ length: 5 }).map((_, optIndex) => {
-                  const isSelected = q.correctAnswer.split(',').includes((optIndex + 1).toString());
-                  const optionValue = q.options[optIndex] || '';
-                  const isFillInTheBlank = q.questionType === QuestionType.FillInTheBlank;
-                  const isDisabled = isFillInTheBlank && optIndex > 0;
-                  const isClickable = !isDisabled && (q.questionType === QuestionType.MultipleChoice || q.questionType === QuestionType.Checkbox || q.questionType === QuestionType.FillInTheBlank) && (optionValue || isFillInTheBlank);
+        return (
+          <article
+            key={qIndex}
+            className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800"
+          >
+            <div className="flex flex-col gap-3 border-b border-gray-200 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-900 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-11 w-11 flex-none items-center justify-center rounded bg-indigo-600 text-sm font-black text-white">
+                  {qIndex + 1}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-base font-black text-gray-900 dark:text-gray-100">
+                    Cau {qIndex + 1}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                    <span>{getQuestionTypeLabel(q.questionType)}</span>
+                    {q.sourceFile && <span>{q.sourceFile}</span>}
+                    {q.exportGroup && <span>{q.exportGroup}</span>}
+                  </div>
+                </div>
+              </div>
 
-                  return (
-                    <td 
-                      key={optIndex} 
-                      className={`px-6 py-4 transition-colors ${isClickable ? 'cursor-pointer' : ''} ${isSelected ? 'bg-green-100 dark:bg-green-800' : ''} ${isDisabled ? 'bg-gray-100 dark:bg-gray-700 opacity-50' : ''}`}
-                      onClick={() => isClickable && handleOptionClick(qIndex, optIndex)}
-                    >
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-bold uppercase text-gray-500 dark:text-gray-400">Loai</span>
+                  <select
+                    value={q.questionType}
+                    onChange={(event) => onQuestionChange(qIndex, 'questionType', event.target.value as QuestionType)}
+                    className="w-full rounded border border-gray-300 bg-white p-2 text-sm font-semibold text-gray-800 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 sm:w-44"
+                  >
+                    {Object.values(QuestionType).map(type => (
+                      <option key={type} value={type}>{getQuestionTypeLabel(type)}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-1 block text-xs font-bold uppercase text-gray-500 dark:text-gray-400">Giay</span>
+                  <input
+                    type="number"
+                    value={q.timeInSeconds}
+                    onChange={(event) => onQuestionChange(qIndex, 'timeInSeconds', parseInt(event.target.value, 10) || 0)}
+                    className="w-full rounded border border-gray-300 bg-white p-2 text-sm font-semibold text-gray-800 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 sm:w-24"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 p-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+              <div className="space-y-4">
+                <label className="block">
+                  <span className="mb-2 block text-sm font-black text-gray-800 dark:text-gray-100">
+                    Noi dung cau hoi
+                  </span>
+                  <textarea
+                    value={q.questionText}
+                    onChange={(event) => onQuestionChange(qIndex, 'questionText', event.target.value)}
+                    className="w-full resize-y rounded border border-gray-300 bg-gray-50 p-3 text-base leading-7 text-gray-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                    rows={getTextareaRows(q.questionText, 4, 12, 58)}
+                  />
+                </label>
+
+                <section>
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-sm font-black text-gray-800 dark:text-gray-100">
+                      Dap an lua chon
+                    </h3>
+                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                      Dap an dung: {q.correctAnswer || 'chua chon'}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {Array.from({ length: isFillInTheBlank ? 1 : 5 }).map((_, optIndex) => {
+                      const answerIndex = (optIndex + 1).toString();
+                      const isSelected = selectedAnswers.includes(answerIndex);
+                      const optionValue = q.options[optIndex] || '';
+                      const isClickable = Boolean(optionValue || isFillInTheBlank) &&
+                        (
+                          q.questionType === QuestionType.MultipleChoice ||
+                          q.questionType === QuestionType.Checkbox ||
+                          q.questionType === QuestionType.FillInTheBlank
+                        );
+
+                      return (
+                        <div
+                          key={optIndex}
+                          className={`rounded-lg border p-3 transition-colors ${
+                            isSelected
+                              ? 'border-green-400 bg-green-50 dark:border-green-700 dark:bg-green-950'
+                              : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800'
+                          }`}
+                        >
+                          <div className="mb-2 flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={!isClickable}
+                              onClick={() => handleOptionClick(qIndex, optIndex)}
+                              className={`flex h-9 w-9 flex-none items-center justify-center rounded border text-sm font-black transition-colors ${
+                                isSelected
+                                  ? 'border-green-600 bg-green-600 text-white'
+                                  : 'border-gray-300 bg-gray-50 text-gray-700 hover:border-indigo-400 hover:bg-indigo-50 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100'
+                              } disabled:cursor-not-allowed disabled:opacity-45`}
+                              title={`Dap an ${optionLabels[optIndex] || optIndex + 1}`}
+                            >
+                              {optionLabels[optIndex] || optIndex + 1}
+                            </button>
+                            <div className="min-w-0 text-sm font-bold text-gray-700 dark:text-gray-200">
+                              {isFillInTheBlank ? 'Dap an dien khuyet' : `Lua chon ${optionLabels[optIndex] || optIndex + 1}`}
+                            </div>
+                          </div>
+
+                          <textarea
+                            value={optionValue}
+                            placeholder={isFillInTheBlank ? 'Nhap dap an...' : `Noi dung dap an ${optionLabels[optIndex] || optIndex + 1}`}
+                            onChange={(event) => handleOptionChange(qIndex, optIndex, event.target.value)}
+                            className={`w-full resize-y rounded border bg-white p-2 text-sm leading-6 text-gray-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:bg-gray-700 dark:text-gray-100 ${
+                              isSelected
+                                ? 'border-green-400 dark:border-green-700'
+                                : 'border-gray-300 dark:border-gray-600'
+                            }`}
+                            rows={getTextareaRows(optionValue, 2, 7, 42)}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              </div>
+
+              <aside className="space-y-4">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-black text-gray-800 dark:text-gray-100">
+                      Dap an dung
+                    </span>
+                    <div className="relative">
                       <input
                         type="text"
-                        value={optionValue}
-                        disabled={isDisabled}
-                        placeholder={isFillInTheBlank && optIndex === 0 ? "Enter answer..." : ""}
-                        onChange={(e) => handleOptionChange(qIndex, optIndex, e.target.value)}
-                        className={`w-full p-1 border rounded bg-transparent ${isSelected ? 'border-green-400 dark:border-green-600' : 'border-gray-300 dark:border-gray-600'} ${isDisabled ? 'cursor-not-allowed' : ''}`}
+                        value={q.correctAnswer}
+                        onChange={(event) => onQuestionChange(qIndex, 'correctAnswer', event.target.value)}
+                        className={`w-full rounded border bg-white p-2 pr-9 text-sm font-semibold text-gray-800 dark:bg-gray-700 dark:text-gray-100 ${
+                          q.isSolved ? 'border-indigo-400 dark:border-indigo-600' : 'border-gray-300 dark:border-gray-600'
+                        }`}
                       />
-                    </td>
-                  );
-              })}
-              <td className="px-6 py-4">
-                <div className="relative">
-                    <input
-                    type="text"
-                    value={q.correctAnswer}
-                    onChange={(e) => onQuestionChange(qIndex, 'correctAnswer', e.target.value)}
-                    className={`w-full p-1 border rounded bg-gray-50 dark:bg-gray-700 ${q.isSolved ? 'border-indigo-400 dark:border-indigo-600' : 'border-gray-300 dark:border-gray-600'}`}
-                    />
-                    {q.isSolving && (
-                        <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                            <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                      {q.isSolving && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent"></div>
                         </div>
-                    )}
+                      )}
+                    </div>
+                  </label>
                 </div>
-              </td>
-              <td className="px-6 py-4">
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-black text-gray-800 dark:text-gray-100">
+                    Giai thich
+                  </span>
+                  <textarea
+                    value={q.answerExplanation}
+                    onChange={(event) => onQuestionChange(qIndex, 'answerExplanation', event.target.value)}
+                    className="w-full resize-y rounded border border-gray-300 bg-gray-50 p-3 text-sm leading-6 text-gray-800 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                    rows={getTextareaRows(q.answerExplanation, 4, 10, 50)}
+                    placeholder="AI explanation..."
+                  />
+                </label>
+
                 <div
-                  className="min-w-64 space-y-2 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                  className="space-y-3 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 p-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
                   tabIndex={0}
                   onPaste={(event) => handlePasteImage(qIndex, event)}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => handleDropImage(qIndex, event)}
-                  title="Chọn ảnh, kéo-thả ảnh, hoặc click vào đây rồi Ctrl+V ảnh."
+                  title="Chon anh, keo-tha anh, hoac click vao day roi Ctrl+V anh."
                 >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-black text-gray-800 dark:text-gray-100">Anh minh hoa</div>
+                    {q.imageLink && (
+                      <button
+                        type="button"
+                        onClick={() => onQuestionChange(qIndex, 'imageLink', '')}
+                        className="rounded bg-red-100 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-200"
+                      >
+                        Xoa anh
+                      </button>
+                    )}
+                  </div>
+
                   {q.imageLink ? (
                     <div className="space-y-2">
                       <img
                         src={q.imageLink}
-                        alt={`Ảnh câu ${qIndex + 1}`}
-                        className="max-h-32 w-full rounded border border-gray-200 object-contain bg-white dark:border-gray-600 dark:bg-gray-800"
+                        alt={`Anh cau ${qIndex + 1}`}
+                        className="max-h-56 w-full rounded border border-gray-200 bg-white object-contain dark:border-gray-600 dark:bg-gray-800"
                         onError={(event) => {
                           event.currentTarget.style.display = 'none';
                         }}
                       />
                       <div className="text-xs font-semibold text-green-700 dark:text-green-300">
-                        {isEmbeddedImage ? `Đã nhúng offline${imageSizeLabel ? ` (${imageSizeLabel})` : ''}` : 'Đang dùng URL ảnh'}
+                        {isEmbeddedImage ? `Da nhung offline${imageSizeLabel ? ` (${imageSizeLabel})` : ''}` : 'Dang dung URL anh'}
                       </div>
                     </div>
                   ) : (
-                    <div className="flex min-h-24 items-center justify-center rounded bg-white px-3 py-4 text-center text-xs font-semibold text-gray-500 dark:bg-gray-800 dark:text-gray-300">
-                      Chọn, kéo-thả, hoặc Ctrl+V ảnh vào đây
+                    <div className="flex min-h-28 items-center justify-center rounded bg-white px-3 py-4 text-center text-sm font-semibold text-gray-500 dark:bg-gray-800 dark:text-gray-300">
+                      Chon, keo-tha, hoac Ctrl+V anh vao day
                     </div>
                   )}
 
                   <div className="flex flex-wrap gap-2">
                     <label
                       htmlFor={`question-image-${qIndex}`}
-                      className="cursor-pointer rounded bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700"
+                      className="cursor-pointer rounded bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700"
                     >
-                      Chọn ảnh
+                      Chon anh
                     </label>
                     <input
                       id={`question-image-${qIndex}`}
@@ -251,47 +370,21 @@ const QuestionTable: React.FC<QuestionTableProps> = ({ questions, onQuestionChan
                         event.target.value = '';
                       }}
                     />
-                    {q.imageLink && (
-                      <button
-                        type="button"
-                        onClick={() => onQuestionChange(qIndex, 'imageLink', '')}
-                        className="rounded bg-red-100 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-200 dark:bg-red-900/40 dark:text-red-200"
-                      >
-                        Xóa ảnh
-                      </button>
-                    )}
                   </div>
 
                   <input
                     type="text"
                     value={isEmbeddedImage ? '' : q.imageLink}
                     onChange={(event) => onQuestionChange(qIndex, 'imageLink', event.target.value)}
-                    placeholder={isEmbeddedImage ? 'Ảnh đang được nhúng offline trong file HTML' : 'Hoặc dán URL ảnh...'}
-                    className="w-full rounded border border-gray-300 bg-white p-1 text-xs dark:border-gray-600 dark:bg-gray-800"
+                    placeholder={isEmbeddedImage ? 'Anh dang duoc nhung offline trong file HTML' : 'Hoac dan URL anh...'}
+                    className="w-full rounded border border-gray-300 bg-white p-2 text-xs dark:border-gray-600 dark:bg-gray-800"
                   />
                 </div>
-              </td>
-              <td className="px-6 py-4">
-                <textarea
-                  value={q.answerExplanation}
-                  onChange={(e) => onQuestionChange(qIndex, 'answerExplanation', e.target.value)}
-                  className="w-full p-1 border rounded bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600"
-                  rows={2}
-                  placeholder="AI explanation..."
-                />
-              </td>
-              <td className="px-6 py-4">
-                <input
-                  type="number"
-                  value={q.timeInSeconds}
-                  onChange={(e) => onQuestionChange(qIndex, 'timeInSeconds', parseInt(e.target.value, 10) || 0)}
-                  className="w-20 p-1 border rounded bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600"
-                />
-              </td>
-            </tr>
-          );})}
-        </tbody>
-      </table>
+              </aside>
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 };
