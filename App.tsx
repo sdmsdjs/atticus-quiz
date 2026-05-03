@@ -23,6 +23,7 @@ const EXPORT_QUESTIONS_PER_FILE_STORAGE_KEY = 'quiz-helper-export-questions-per-
 const NETLIFY_TOKEN_STORAGE_KEY = 'quiz-helper-netlify-token';
 const NETLIFY_SITE_NAME_STORAGE_KEY = 'quiz-helper-netlify-site-name';
 const NETLIFY_DEPLOY_MODE_STORAGE_KEY = 'quiz-helper-netlify-deploy-mode';
+const NETLIFY_SITE_NAME_MAX_LENGTH = 63;
 const MAMMOTH_CDN_URL = 'https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js';
 
 type MammothBrowser = {
@@ -94,6 +95,10 @@ type ParseTask = {
 type ExportGroup = {
   name: string;
   questions: Question[];
+};
+
+type NetlifyDeployListItem = NetlifyDeployResult & {
+  groupName: string;
 };
 
 type ApiKeyIssueKind = 'quota-limit' | 'temporary' | 'auth' | 'other';
@@ -550,8 +555,7 @@ const App: React.FC = () => {
   const [netlifyDeployMode, setNetlifyDeployMode] = useState<NetlifyDeployMode>(() =>
     getStorageOption<NetlifyDeployMode>(NETLIFY_DEPLOY_MODE_STORAGE_KEY, 'default', ['default', 'custom'])
   );
-  const [netlifyGroupIndex, setNetlifyGroupIndex] = useState<number>(0);
-  const [netlifyResult, setNetlifyResult] = useState<NetlifyDeployResult | null>(null);
+  const [netlifyResults, setNetlifyResults] = useState<NetlifyDeployListItem[]>([]);
   const [apiDelayMs, setApiDelayMs] = useState<number>(() => getStorageNumber(API_DELAY_STORAGE_KEY, 1500));
   const [retryCount, setRetryCount] = useState<number>(() => getStorageNumber(RETRY_COUNT_STORAGE_KEY, 3));
   const [retryDelayMs, setRetryDelayMs] = useState<number>(() => getStorageNumber(RETRY_DELAY_STORAGE_KEY, 4000));
@@ -581,7 +585,6 @@ const App: React.FC = () => {
     () => buildExportGroups(questions, exportSplitMode, exportQuestionsPerFile, exportBaseName),
     [questions, exportSplitMode, exportQuestionsPerFile, exportBaseName]
   );
-  const selectedNetlifyGroup = exportGroups[netlifyGroupIndex] || exportGroups[0] || null;
 
   useEffect(() => {
     setApiKeyStatuses(apiKeys.map(createApiKeyStatus));
@@ -656,8 +659,8 @@ const App: React.FC = () => {
   }, [exportQuestionsPerFile]);
 
   useEffect(() => {
-    setNetlifyGroupIndex(prev => Math.min(prev, Math.max(exportGroups.length - 1, 0)));
-  }, [exportGroups.length]);
+    setNetlifyResults([]);
+  }, [questions, exportSplitMode, exportQuestionsPerFile]);
 
   useEffect(() => {
     return () => {
@@ -1037,6 +1040,17 @@ const App: React.FC = () => {
     }
   };
 
+  const getNetlifySiteNameForGroup = (index: number, groupCount: number): string | undefined => {
+    const baseSiteName = netlifySiteName.trim();
+    if (!baseSiteName) return undefined;
+    if (groupCount <= 1) return baseSiteName;
+
+    const suffix = `-${index + 1}`;
+    const maxBaseLength = Math.max(1, NETLIFY_SITE_NAME_MAX_LENGTH - suffix.length);
+    const safeBase = baseSiteName.slice(0, maxBaseLength).replace(/^-+|-+$/g, '') || 'quiz';
+    return `${safeBase}${suffix}`;
+  };
+
   const handleDeployNetlify = async () => {
     if (questions.length === 0) return;
 
@@ -1045,16 +1059,16 @@ const App: React.FC = () => {
       return;
     }
 
-    const group = selectedNetlifyGroup || { name: exportBaseName, questions };
+    const groupsToDeploy = exportGroups.length > 0 ? exportGroups : [{ name: exportBaseName, questions }];
 
-    if (group.questions.length === 0) {
+    if (groupsToDeploy.every(group => group.questions.length === 0)) {
       setError('Khong co cau hoi nao de deploy len Netlify.');
       return;
     }
 
     setIsDeployingNetlify(true);
     setError(null);
-    setNetlifyResult(null);
+    setNetlifyResults([]);
 
     try {
       const [{ buildHtmlDocument }, netlifyService] = await Promise.all([
@@ -1062,23 +1076,34 @@ const App: React.FC = () => {
         import('./services/netlifyService'),
       ]);
 
-      const html = buildHtmlDocument(group.questions, group.name);
-      const result = netlifyDeployMode === 'custom'
-        ? await netlifyService.deployQuizToNetlify({
-          accessToken: netlifyToken,
-          html,
-          title: group.name,
-          siteName: netlifySiteName,
-        })
-        : await netlifyService.deployQuizWithDefaultNetlifyToken({
-          html,
-          title: group.name,
-          siteName: netlifySiteName,
-        });
+      const successfulResults: NetlifyDeployListItem[] = [];
 
-      setNetlifyResult(result);
+      for (const [index, group] of groupsToDeploy.entries()) {
+        if (group.questions.length === 0) continue;
+
+        const html = buildHtmlDocument(group.questions, group.name);
+        const siteName = getNetlifySiteNameForGroup(index, groupsToDeploy.length);
+        const result = netlifyDeployMode === 'custom'
+          ? await netlifyService.deployQuizToNetlify({
+            accessToken: netlifyToken,
+            html,
+            title: group.name,
+            siteName,
+          })
+          : await netlifyService.deployQuizWithDefaultNetlifyToken({
+            html,
+            title: group.name,
+            siteName,
+          });
+
+        successfulResults.push({
+          ...result,
+          groupName: group.name,
+        });
+        setNetlifyResults([...successfulResults]);
+      }
     } catch (err) {
-      setError(getErrorMessage(err) || 'Khong the tao link Netlify.');
+      setError(getErrorMessage(err) || 'Khong the tao du link Netlify.');
     } finally {
       setIsDeployingNetlify(false);
     }
@@ -1327,7 +1352,7 @@ const App: React.FC = () => {
                           value={netlifyDeployMode}
                           onChange={(event) => {
                             setNetlifyDeployMode(event.target.value as NetlifyDeployMode);
-                            setNetlifyResult(null);
+                            setNetlifyResults([]);
                           }}
                           className="w-full p-2 border rounded bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-sky-500 focus:border-sky-500 text-sm"
                         >
@@ -1343,33 +1368,14 @@ const App: React.FC = () => {
                         <input
                           type="text"
                           value={netlifySiteName}
-                          onChange={(event) => setNetlifySiteName(event.target.value)}
+                          onChange={(event) => {
+                            setNetlifySiteName(event.target.value);
+                            setNetlifyResults([]);
+                          }}
                           placeholder="Auto neu de trong"
                           className="w-full p-2 border rounded bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-sky-500 focus:border-sky-500 text-sm"
                         />
                       </label>
-
-                      {exportGroups.length > 1 && (
-                        <label className="block">
-                          <span className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                            Bai deploy
-                          </span>
-                          <select
-                            value={netlifyGroupIndex}
-                            onChange={(event) => {
-                              setNetlifyGroupIndex(Number(event.target.value) || 0);
-                              setNetlifyResult(null);
-                            }}
-                            className="w-full p-2 border rounded bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-sky-500 focus:border-sky-500 text-sm"
-                          >
-                            {exportGroups.map((group, index) => (
-                              <option key={`${group.name}-${index}`} value={index}>
-                                {group.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
 
                       <label className={`block ${netlifyDeployMode === 'custom' ? '' : 'opacity-60'}`}>
                         <span className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
@@ -1379,7 +1385,10 @@ const App: React.FC = () => {
                           <input
                             type="text"
                             value={netlifyToken}
-                            onChange={(event) => setNetlifyToken(event.target.value)}
+                            onChange={(event) => {
+                              setNetlifyToken(event.target.value);
+                              setNetlifyResults([]);
+                            }}
                             placeholder="nfp_..."
                             disabled={netlifyDeployMode !== 'custom'}
                             style={showNetlifyToken ? undefined : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)}
@@ -1538,37 +1547,46 @@ const App: React.FC = () => {
                   className="flex items-center justify-center px-5 py-2 bg-slate-800 text-white font-semibold rounded-lg shadow-md hover:bg-slate-900 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all duration-300"
                 >
                   <CloudUploadIcon className="w-5 h-5 mr-2" />
-                  {isDeployingNetlify ? 'Deploying...' : 'Create Link'}
+                  {isDeployingNetlify ? 'Deploying...' : `Create Link${exportGroups.length > 1 ? 's' : ''}`}
                 </button>
               </div>
             </div>
 
-            {netlifyResult && (
-              <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-3 rounded-lg bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 p-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-green-700 dark:text-green-200">
-                    {netlifyResult.siteName} - {netlifyResult.state}
-                  </div>
-                  <a
-                    href={netlifyResult.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="break-all text-sky-700 dark:text-sky-300 font-semibold hover:underline"
-                  >
-                    {netlifyResult.url}
-                  </a>
+            {netlifyResults.length > 0 && (
+              <div className="mb-6 rounded-lg bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800">
+                <div className="px-3 py-2 border-b border-green-200 dark:border-green-800 text-sm font-bold text-green-700 dark:text-green-200">
+                  Da tao {netlifyResults.length} link Netlify
                 </div>
-                {netlifyResult.adminUrl && (
-                  <a
-                    href={netlifyResult.adminUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center justify-center gap-1 px-3 py-2 bg-white dark:bg-gray-800 border border-green-200 dark:border-green-800 rounded text-sm font-semibold text-green-700 dark:text-green-200 hover:bg-green-100 dark:hover:bg-green-900"
-                  >
-                    Dashboard
-                    <ExternalLinkIcon className="w-4 h-4" />
-                  </a>
-                )}
+                <div className="divide-y divide-green-200 dark:divide-green-800">
+                  {netlifyResults.map((result, index) => (
+                    <div key={`${result.siteId}-${result.deployId}-${index}`} className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-green-700 dark:text-green-200">
+                          {result.groupName} - {result.siteName} - {result.state}
+                        </div>
+                        <a
+                          href={result.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="break-all text-sky-700 dark:text-sky-300 font-semibold hover:underline"
+                        >
+                          {result.url}
+                        </a>
+                      </div>
+                      {result.adminUrl && (
+                        <a
+                          href={result.adminUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center justify-center gap-1 px-3 py-2 bg-white dark:bg-gray-800 border border-green-200 dark:border-green-800 rounded text-sm font-semibold text-green-700 dark:text-green-200 hover:bg-green-100 dark:hover:bg-green-900"
+                        >
+                          Dashboard
+                          <ExternalLinkIcon className="w-4 h-4" />
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

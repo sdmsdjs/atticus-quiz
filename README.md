@@ -244,11 +244,11 @@ Các chế độ chia file xuất:
 Sau khi có danh sách câu hỏi, có thể tạo site Netlify trực tiếp từ bản HTML quiz:
 
 1. Bấm `Create Link`.
-2. Chọn `Bài deploy` nếu output đang được chia thành nhiều file.
+2. Nếu output đang được chia thành nhiều file, ứng dụng sẽ tạo link cho từng phần.
 3. Mở `Settings` nếu muốn đổi `Site slug` hoặc dùng token riêng.
 4. Chờ Netlify trả về trạng thái `ready`.
 
-Ứng dụng tạo một Netlify site mới, deploy file `index.html`, sau đó hiển thị link công khai dạng `https://<site>.netlify.app`.
+Ứng dụng tạo Netlify site mới cho từng phần cần deploy, deploy file `index.html`, sau đó hiển thị các link công khai dạng `https://<site>.netlify.app`.
 
 Mặc định, nút `Create Link` dùng Netlify token được cấu hình ở server bằng biến môi trường `NETLIFY_ACCESS_TOKEN`. Không đưa token này vào code frontend, không đặt trong biến `VITE_*`, và không commit vào GitHub.
 
