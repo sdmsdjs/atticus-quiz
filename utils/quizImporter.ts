@@ -49,6 +49,34 @@ const normalizeHeader = (value: unknown): string =>
     String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 const asString = (value: unknown): string => String(value ?? '').trim();
+const asRawString = (value: unknown): string => String(value ?? '');
+
+const findHeaderIndex = (headers: string[], name: string, fallback?: number): number => {
+    const index = headers.indexOf(normalizeHeader(name));
+    return index >= 0 ? index : (fallback ?? -1);
+};
+
+const readJoinedCell = (row: unknown[], headers: string[], name: string, fallback: number): string => {
+    const firstIndex = findHeaderIndex(headers, name, fallback);
+    const continuationIndexes: number[] = [];
+
+    for (let part = 2; ; part++) {
+        const index = findHeaderIndex(headers, `${name} continuation ${part}`);
+        if (index < 0) break;
+        continuationIndexes.push(index);
+    }
+
+    if (continuationIndexes.length === 0) {
+        return firstIndex >= 0 ? asString(row[firstIndex]) : '';
+    }
+
+    const parts = [
+        firstIndex >= 0 ? asRawString(row[firstIndex]) : '',
+        ...continuationIndexes.map(index => asRawString(row[index])),
+    ];
+
+    return parts.join('');
+};
 
 export const importQuestionsFromXlsx = async (file: File): Promise<Question[]> => {
     const XLSX = await import('xlsx');
@@ -60,10 +88,7 @@ export const importQuestionsFromXlsx = async (file: File): Promise<Question[]> =
     if (rows.length < 2) return [];
 
     const headers = rows[0].map(normalizeHeader);
-    const indexOf = (name: string, fallback: number) => {
-        const index = headers.indexOf(name);
-        return index >= 0 ? index : fallback;
-    };
+    const indexOf = (name: string, fallback: number) => findHeaderIndex(headers, name, fallback);
 
     const questionIndex = indexOf('question text', 0);
     const typeIndex = indexOf('question type', 1);
@@ -76,32 +101,87 @@ export const importQuestionsFromXlsx = async (file: File): Promise<Question[]> =
     return rows.slice(1)
         .map(row => {
             const question = defaultQuestion(file.name);
-            question.questionText = asString(row[questionIndex]);
+            question.questionText = readJoinedCell(row, headers, 'Question text', questionIndex);
             question.questionType = normalizeQuestionType(row[typeIndex]);
-            question.options = optionIndexes.map(index => asString(row[index])).filter(Boolean);
-            question.correctAnswer = asString(row[answerIndex]);
+            question.options = optionIndexes.map((index, optionIndex) =>
+                readJoinedCell(row, headers, `Option ${optionIndex + 1}`, index)
+            ).filter(Boolean);
+            question.correctAnswer = readJoinedCell(row, headers, 'Correct answer', answerIndex);
             question.timeInSeconds = Number(row[timeIndex]) || 60;
-            question.imageLink = asString(row[imageIndex]);
-            question.answerExplanation = asString(row[explanationIndex]);
+            question.imageLink = readJoinedCell(row, headers, 'Link of the image', imageIndex);
+            question.answerExplanation = readJoinedCell(row, headers, 'Answer explanation', explanationIndex);
             return question;
         })
         .filter(question => question.questionText || question.options.length > 0);
 };
 
+const extractJsonFromDataScript = (html: string): string | null => {
+    const match = html.match(/<script\b(?=[^>]*\bid=(["'])quiz-data\1)[^>]*>([\s\S]*?)<\/script>/i);
+    return match ? match[2].trim() : null;
+};
+
+const findJsonEnd = (html: string, start: number): number => {
+    let index = start;
+
+    while (/\s/.test(html[index] || '')) index++;
+
+    const firstChar = html[index];
+    if (firstChar !== '[' && firstChar !== '{') {
+        throw new Error('Du lieu JSON trong file HTML khong hop le.');
+    }
+
+    let depth = 0;
+    let inString = false;
+    let escaping = false;
+
+    for (; index < html.length; index++) {
+        const char = html[index];
+
+        if (inString) {
+            if (escaping) {
+                escaping = false;
+            } else if (char === '\\') {
+                escaping = true;
+            } else if (char === '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (char === '"') {
+            inString = true;
+            continue;
+        }
+
+        if (char === '[' || char === '{') {
+            depth++;
+            continue;
+        }
+
+        if (char === ']' || char === '}') {
+            depth--;
+            if (depth === 0) return index + 1;
+        }
+    }
+
+    throw new Error('File HTML co du lieu JSON chua dong het.');
+};
+
 const extractSlidesJson = (html: string): string => {
-    const marker = 'initSlides(';
-    const start = html.lastIndexOf(marker);
+    const dataScriptJson = extractJsonFromDataScript(html);
+    if (dataScriptJson) return dataScriptJson;
 
-    if (start < 0) {
-        throw new Error('Khong tim thay du lieu initSlides trong file HTML.');
+    const markers = ['initSlides(', 'loadQuizData('];
+    const found = markers
+        .map(marker => ({ marker, start: html.lastIndexOf(marker) }))
+        .sort((a, b) => b.start - a.start)[0];
+
+    if (!found || found.start < 0) {
+        throw new Error('Khong tim thay du lieu quiz trong file HTML.');
     }
 
-    const jsonStart = start + marker.length;
-    const end = html.indexOf(');', jsonStart);
-
-    if (end < 0) {
-        throw new Error('File HTML co du lieu initSlides khong hop le.');
-    }
+    const jsonStart = found.start + found.marker.length;
+    const end = findJsonEnd(html, jsonStart);
 
     return html.slice(jsonStart, end);
 };

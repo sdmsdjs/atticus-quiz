@@ -1061,7 +1061,8 @@ function initSlides(data) {
     renderHome();
 }
 </script>
-<script>initSlides(${slidesJson});</script>
+<script type="application/json" id="quiz-data">${slidesJson}</script>
+<script>initSlides(JSON.parse(document.getElementById('quiz-data').textContent || '[]'));</script>
 </body>
 </html>`;
 };
