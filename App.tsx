@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Question, QuestionType, ParsedQuestion } from './types';
 import type { NetlifyDeployResult } from './services/netlifyService';
+import type { CloudflarePublishResult } from './services/cloudflareService';
 import { DEFAULT_GEMINI_MODEL } from './services/geminiConstants';
 import { makeExportBaseName, sanitizeFileName } from './utils/fileName';
 import FileUpload from './components/FileUpload';
@@ -23,6 +24,8 @@ const EXPORT_QUESTIONS_PER_FILE_STORAGE_KEY = 'quiz-helper-export-questions-per-
 const NETLIFY_TOKEN_STORAGE_KEY = 'quiz-helper-netlify-token';
 const NETLIFY_SITE_NAME_STORAGE_KEY = 'quiz-helper-netlify-site-name';
 const NETLIFY_DEPLOY_MODE_STORAGE_KEY = 'quiz-helper-netlify-deploy-mode';
+const CLOUDFLARE_PUBLISH_TOKEN_STORAGE_KEY = 'quiz-helper-cloudflare-publish-token';
+const CLOUDFLARE_SLUG_STORAGE_KEY = 'quiz-helper-cloudflare-slug';
 const NETLIFY_SITE_NAME_MAX_LENGTH = 63;
 const MAMMOTH_CDN_URL = 'https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js';
 
@@ -98,6 +101,10 @@ type ExportGroup = {
 };
 
 type NetlifyDeployListItem = NetlifyDeployResult & {
+  groupName: string;
+};
+
+type CloudflarePublishListItem = CloudflarePublishResult & {
   groupName: string;
 };
 
@@ -543,6 +550,7 @@ const App: React.FC = () => {
   const [isSolving, setIsSolving] = useState<boolean>(false);
   const [isImporting, setIsImporting] = useState<boolean>(false);
   const [isDeployingNetlify, setIsDeployingNetlify] = useState<boolean>(false);
+  const [isPublishingCloudflare, setIsPublishingCloudflare] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem(API_KEY_STORAGE_KEY) || '');
@@ -552,10 +560,15 @@ const App: React.FC = () => {
   const [netlifySiteName, setNetlifySiteName] = useState<string>(() => localStorage.getItem(NETLIFY_SITE_NAME_STORAGE_KEY) || '');
   const [showNetlifyToken, setShowNetlifyToken] = useState<boolean>(false);
   const [showNetlifySettings, setShowNetlifySettings] = useState<boolean>(false);
+  const [cloudflarePublishToken, setCloudflarePublishToken] = useState<string>(() => localStorage.getItem(CLOUDFLARE_PUBLISH_TOKEN_STORAGE_KEY) || '');
+  const [cloudflareSlug, setCloudflareSlug] = useState<string>(() => localStorage.getItem(CLOUDFLARE_SLUG_STORAGE_KEY) || '');
+  const [showCloudflareToken, setShowCloudflareToken] = useState<boolean>(false);
+  const [showCloudflareSettings, setShowCloudflareSettings] = useState<boolean>(false);
   const [netlifyDeployMode, setNetlifyDeployMode] = useState<NetlifyDeployMode>(() =>
     getStorageOption<NetlifyDeployMode>(NETLIFY_DEPLOY_MODE_STORAGE_KEY, 'default', ['default', 'custom'])
   );
   const [netlifyResults, setNetlifyResults] = useState<NetlifyDeployListItem[]>([]);
+  const [cloudflareResults, setCloudflareResults] = useState<CloudflarePublishListItem[]>([]);
   const [apiDelayMs, setApiDelayMs] = useState<number>(() => getStorageNumber(API_DELAY_STORAGE_KEY, 1500));
   const [retryCount, setRetryCount] = useState<number>(() => getStorageNumber(RETRY_COUNT_STORAGE_KEY, 3));
   const [retryDelayMs, setRetryDelayMs] = useState<number>(() => getStorageNumber(RETRY_DELAY_STORAGE_KEY, 4000));
@@ -576,10 +589,11 @@ const App: React.FC = () => {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [apiKeyStatuses, setApiKeyStatuses] = useState<ApiKeyDisplayStatus[]>([]);
 
-  const isBusy = isProcessing || isSolving || isImporting || isDeployingNetlify;
+  const isBusy = isProcessing || isSolving || isImporting || isDeployingNetlify || isPublishingCloudflare;
   const apiKeys = useMemo(() => parseApiKeys(apiKey), [apiKey]);
   const hasApiKey = apiKeys.length > 0;
   const hasCustomNetlifyToken = netlifyToken.trim().length > 0;
+  const hasCloudflarePublishToken = cloudflarePublishToken.trim().length > 0;
   const exportBaseName = useMemo(() => makeExportBaseName(questions), [questions]);
   const exportGroups = useMemo(
     () => buildExportGroups(questions, exportSplitMode, exportQuestionsPerFile, exportBaseName),
@@ -613,6 +627,22 @@ const App: React.FC = () => {
       localStorage.removeItem(NETLIFY_SITE_NAME_STORAGE_KEY);
     }
   }, [netlifySiteName]);
+
+  useEffect(() => {
+    if (cloudflarePublishToken.trim()) {
+      localStorage.setItem(CLOUDFLARE_PUBLISH_TOKEN_STORAGE_KEY, cloudflarePublishToken.trim());
+    } else {
+      localStorage.removeItem(CLOUDFLARE_PUBLISH_TOKEN_STORAGE_KEY);
+    }
+  }, [cloudflarePublishToken]);
+
+  useEffect(() => {
+    if (cloudflareSlug.trim()) {
+      localStorage.setItem(CLOUDFLARE_SLUG_STORAGE_KEY, cloudflareSlug.trim());
+    } else {
+      localStorage.removeItem(CLOUDFLARE_SLUG_STORAGE_KEY);
+    }
+  }, [cloudflareSlug]);
 
   useEffect(() => {
     localStorage.setItem(NETLIFY_DEPLOY_MODE_STORAGE_KEY, netlifyDeployMode);
@@ -660,6 +690,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     setNetlifyResults([]);
+    setCloudflareResults([]);
   }, [questions, exportSplitMode, exportQuestionsPerFile]);
 
   useEffect(() => {
@@ -1051,6 +1082,65 @@ const App: React.FC = () => {
     return `${safeBase}${suffix}`;
   };
 
+  const getCloudflareSlugForGroup = (index: number, groupCount: number): string | undefined => {
+    const baseSlug = cloudflareSlug.trim();
+    if (!baseSlug) return undefined;
+    if (groupCount <= 1) return baseSlug;
+
+    return `${baseSlug}-${index + 1}`;
+  };
+
+  const handlePublishCloudflare = async () => {
+    if (questions.length === 0) return;
+
+    if (!hasCloudflarePublishToken) {
+      setError('Hay nhap Cloudflare publish token truoc khi tao link.');
+      return;
+    }
+
+    const groupsToPublish = exportGroups.length > 0 ? exportGroups : [{ name: exportBaseName, questions }];
+
+    if (groupsToPublish.every(group => group.questions.length === 0)) {
+      setError('Khong co cau hoi nao de luu len Cloudflare KV.');
+      return;
+    }
+
+    setIsPublishingCloudflare(true);
+    setError(null);
+    setCloudflareResults([]);
+
+    try {
+      const [{ buildHtmlDocument }, cloudflareService] = await Promise.all([
+        import('./utils/htmlExporter'),
+        import('./services/cloudflareService'),
+      ]);
+
+      const successfulResults: CloudflarePublishListItem[] = [];
+
+      for (const [index, group] of groupsToPublish.entries()) {
+        if (group.questions.length === 0) continue;
+
+        const html = buildHtmlDocument(group.questions, group.name);
+        const result = await cloudflareService.publishQuizToCloudflare({
+          publishToken: cloudflarePublishToken,
+          html,
+          title: group.name,
+          slug: getCloudflareSlugForGroup(index, groupsToPublish.length),
+        });
+
+        successfulResults.push({
+          ...result,
+          groupName: group.name,
+        });
+        setCloudflareResults([...successfulResults]);
+      }
+    } catch (err) {
+      setError(getErrorMessage(err) || 'Khong the tao link Cloudflare.');
+    } finally {
+      setIsPublishingCloudflare(false);
+    }
+  };
+
   const handleDeployNetlify = async () => {
     if (questions.length === 0) return;
 
@@ -1417,6 +1507,72 @@ const App: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              <div className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-950">
+                <button
+                  type="button"
+                  onClick={() => setShowCloudflareSettings(prev => !prev)}
+                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                >
+                  <span>
+                    <span className="block text-sm font-bold text-gray-800 dark:text-gray-100">Cloudflare Pages/KV</span>
+                    <span className="block text-xs text-gray-500 dark:text-gray-400">
+                      Luu quiz vao KV, link dang /q/slug
+                    </span>
+                  </span>
+                  <span className="text-sm font-semibold text-teal-700 dark:text-teal-300">
+                    {showCloudflareSettings ? 'Hide' : 'Open'}
+                  </span>
+                </button>
+
+                {showCloudflareSettings && (
+                  <div className="border-t border-teal-200 dark:border-teal-800 p-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <label className="block">
+                        <span className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          Publish token
+                        </span>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={cloudflarePublishToken}
+                            onChange={(event) => {
+                              setCloudflarePublishToken(event.target.value);
+                              setCloudflareResults([]);
+                            }}
+                            placeholder="Giong CLOUDFLARE_PUBLISH_TOKEN"
+                            style={showCloudflareToken ? undefined : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)}
+                            className="min-w-0 flex-1 p-2 border rounded bg-white dark:bg-gray-700 border-teal-200 dark:border-teal-800 focus:ring-teal-500 focus:border-teal-500 text-sm"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowCloudflareToken(prev => !prev)}
+                            className="px-3 py-2 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 font-semibold rounded hover:bg-teal-100 dark:hover:bg-teal-900 text-sm"
+                          >
+                            {showCloudflareToken ? 'Hide' : 'Show'}
+                          </button>
+                        </div>
+                      </label>
+
+                      <label className="block">
+                        <span className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          Link slug
+                        </span>
+                        <input
+                          type="text"
+                          value={cloudflareSlug}
+                          onChange={(event) => {
+                            setCloudflareSlug(event.target.value);
+                            setCloudflareResults([]);
+                          }}
+                          placeholder="Auto neu de trong"
+                          className="w-full p-2 border rounded bg-white dark:bg-gray-700 border-teal-200 dark:border-teal-800 focus:ring-teal-500 focus:border-teal-500 text-sm"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1542,6 +1698,14 @@ const App: React.FC = () => {
                   Export XLSX
                 </button>
                 <button
+                  onClick={handlePublishCloudflare}
+                  disabled={isBusy || questions.length === 0 || !hasCloudflarePublishToken}
+                  className="flex items-center justify-center px-5 py-2 bg-teal-700 text-white font-semibold rounded-lg shadow-md hover:bg-teal-800 disabled:bg-teal-300 disabled:cursor-not-allowed transition-all duration-300"
+                >
+                  <CloudUploadIcon className="w-5 h-5 mr-2" />
+                  {isPublishingCloudflare ? 'Publishing...' : `Cloudflare Link${exportGroups.length > 1 ? 's' : ''}`}
+                </button>
+                <button
                   onClick={handleDeployNetlify}
                   disabled={isBusy || questions.length === 0 || (netlifyDeployMode === 'custom' && !hasCustomNetlifyToken)}
                   className="flex items-center justify-center px-5 py-2 bg-slate-800 text-white font-semibold rounded-lg shadow-md hover:bg-slate-900 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all duration-300"
@@ -1584,6 +1748,36 @@ const App: React.FC = () => {
                           <ExternalLinkIcon className="w-4 h-4" />
                         </a>
                       )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {cloudflareResults.length > 0 && (
+              <div className="mb-6 rounded-lg bg-teal-50 dark:bg-teal-950 border border-teal-200 dark:border-teal-800">
+                <div className="px-3 py-2 border-b border-teal-200 dark:border-teal-800 text-sm font-bold text-teal-700 dark:text-teal-200">
+                  Da tao {cloudflareResults.length} link Cloudflare
+                </div>
+                <div className="divide-y divide-teal-200 dark:divide-teal-800">
+                  {cloudflareResults.map((result, index) => (
+                    <div key={`${result.slug}-${index}`} className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-teal-700 dark:text-teal-200">
+                          {result.groupName} - {result.slug}
+                        </div>
+                        <a
+                          href={result.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="break-all text-sky-700 dark:text-sky-300 font-semibold hover:underline"
+                        >
+                          {result.url}
+                        </a>
+                      </div>
+                      <span className="inline-flex items-center justify-center px-3 py-2 bg-white dark:bg-gray-800 border border-teal-200 dark:border-teal-800 rounded text-sm font-semibold text-teal-700 dark:text-teal-200">
+                        {Math.max(1, Math.round(result.size / 1024))} KB
+                      </span>
                     </div>
                   ))}
                 </div>
