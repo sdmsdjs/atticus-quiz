@@ -41,6 +41,14 @@ PUBLIC_BASE_URL=https://ten-pages-cua-ban.pages.dev
 
 `CLOUDFLARE_PUBLISH_TOKEN` la mat khau de app duoc phep ghi quiz vao KV. Khong chia se token nay cho hoc sinh/ban be. `PUBLIC_BASE_URL` khong bat buoc, nhung nen dat neu ban dung custom domain.
 
+Neu Cloudflare dang build ra asset co duong dan `/atticus-quiz/assets/...`, them bien build sau roi deploy lai:
+
+```env
+VITE_BASE_PATH=/
+```
+
+Ban code moi cung tu nhan dien moi truong Cloudflare Pages qua `CF_PAGES` va tu dung base `/`, nhung bien `VITE_BASE_PATH=/` van la cach sua nhanh neu project da deploy bang cau hinh cu.
+
 Sau khi them bien moi truong hoac binding, hay deploy lai Pages project mot lan.
 
 ## 5. Dung trong app

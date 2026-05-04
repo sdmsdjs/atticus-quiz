@@ -9,7 +9,7 @@ export default defineConfig(({ mode }) => {
   };
 
   return {
-    base: env.VITE_BASE_PATH || '/atticus-quiz/',
+    base: env.VITE_BASE_PATH || (env.CF_PAGES ? '/' : '/atticus-quiz/'),
     server: {
       port: 3000,
       host: '0.0.0.0',

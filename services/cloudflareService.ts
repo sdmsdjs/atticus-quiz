@@ -13,6 +13,22 @@ export type PublishQuizToCloudflareOptions = {
   slug?: string;
 };
 
+const DEFAULT_CLOUDFLARE_API_BASE = 'https://atticus-quiz.pages.dev';
+
+const getCloudflareApiBase = (): string => {
+  const meta = import.meta as ImportMeta & {
+    env?: {
+      VITE_CLOUDFLARE_API_BASE?: string;
+    };
+  };
+  const configuredBase = (meta.env?.VITE_CLOUDFLARE_API_BASE || DEFAULT_CLOUDFLARE_API_BASE)
+    .trim()
+    .replace(/\/+$/g, '');
+
+  if (configuredBase) return configuredBase;
+  return window.location.origin;
+};
+
 const readErrorMessage = async (response: Response): Promise<string> => {
   const fallback = `Cloudflare API loi ${response.status}`;
 
@@ -45,7 +61,7 @@ export const publishQuizToCloudflare = async ({
     throw new Error('Hay nhap Cloudflare publish token.');
   }
 
-  const response = await fetch('/api/cloudflare-quizzes', {
+  const response = await fetch(`${getCloudflareApiBase()}/api/cloudflare-quizzes`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
