@@ -54,11 +54,11 @@ Sau khi them bien moi truong hoac binding, hay deploy lai Pages project mot lan.
 ## 5. Dung trong app
 
 1. Mo app tren Cloudflare Pages.
-2. Mo `Cloudflare Pages/KV`.
+2. Mo `Create Link settings`.
 3. Nhap `Publish token` giong bien `CLOUDFLARE_PUBLISH_TOKEN`.
 4. Neu muon link co ten co dinh, nhap `Link slug`, vi du `sinh-11-hk2-phan-2`.
 5. Tao/nhap quiz nhu binh thuong.
-6. Bam `Cloudflare Link`.
+6. Bam `Create Link`.
 
 Ket qua se co dang:
 
@@ -70,7 +70,8 @@ Neu de trong `Link slug`, app se tu tao slug theo ten quiz kem hau to thoi gian 
 
 ## Ghi chu
 
-- Moi lan bam `Cloudflare Link` chi ghi HTML vao KV, khong can deploy production moi.
+- Moi lan bam `Create Link` chi ghi HTML vao KV, khong can deploy production moi.
 - Neu nhap cung mot `Link slug`, quiz cu tai slug do se duoc cap nhat bang noi dung moi.
 - File HTML qua lon se bi chan o muc 20 MB de tranh vuot gioi han KV.
 - Khi chay local bang `npm run dev`, Pages Functions khong chay. De test full local, dung Cloudflare Pages sau khi deploy, hoac cai Wrangler va chay Pages dev.
+- Khong nen nhung `CLOUDFLARE_PUBLISH_TOKEN` vao frontend lam mac dinh cong khai. Token duoc nhap mot lan trong app va luu vao `localStorage` cua trinh duyet ban dang dung.

@@ -6,7 +6,7 @@ import { DEFAULT_GEMINI_MODEL } from './services/geminiConstants';
 import { makeExportBaseName, sanitizeFileName } from './utils/fileName';
 import FileUpload from './components/FileUpload';
 import QuestionTable from './components/QuestionTable';
-import { MagicWandIcon, DownloadIcon, UploadIcon, CloudUploadIcon, ExternalLinkIcon } from './components/icons';
+import { MagicWandIcon, DownloadIcon, UploadIcon, CloudUploadIcon } from './components/icons';
 
 const DOCX_ACCEPT = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx';
 const OUTPUT_ACCEPT = '.xlsx,.xls,.html,.htm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/html';
@@ -563,7 +563,7 @@ const App: React.FC = () => {
   const [cloudflarePublishToken, setCloudflarePublishToken] = useState<string>(() => localStorage.getItem(CLOUDFLARE_PUBLISH_TOKEN_STORAGE_KEY) || '');
   const [cloudflareSlug, setCloudflareSlug] = useState<string>(() => localStorage.getItem(CLOUDFLARE_SLUG_STORAGE_KEY) || '');
   const [showCloudflareToken, setShowCloudflareToken] = useState<boolean>(false);
-  const [showCloudflareSettings, setShowCloudflareSettings] = useState<boolean>(false);
+  const [showCloudflareSettings, setShowCloudflareSettings] = useState<boolean>(true);
   const [netlifyDeployMode, setNetlifyDeployMode] = useState<NetlifyDeployMode>(() =>
     getStorageOption<NetlifyDeployMode>(NETLIFY_DEPLOY_MODE_STORAGE_KEY, 'default', ['default', 'custom'])
   );
@@ -1414,100 +1414,6 @@ const App: React.FC = () => {
                 />
               </label>
 
-              <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-                <button
-                  type="button"
-                  onClick={() => setShowNetlifySettings(prev => !prev)}
-                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-                >
-                  <span>
-                    <span className="block text-sm font-bold text-gray-800 dark:text-gray-100">Netlify settings</span>
-                    <span className="block text-xs text-gray-500 dark:text-gray-400">
-                      {netlifyDeployMode === 'default' ? 'Dung token mac dinh tren server' : 'Dung token rieng tren trinh duyet'}
-                    </span>
-                  </span>
-                  <span className="text-sm font-semibold text-sky-600 dark:text-sky-400">
-                    {showNetlifySettings ? 'Hide' : 'Open'}
-                  </span>
-                </button>
-
-                {showNetlifySettings && (
-                  <div className="border-t border-gray-200 dark:border-gray-700 p-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <label className="block">
-                        <span className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                          Cach deploy
-                        </span>
-                        <select
-                          value={netlifyDeployMode}
-                          onChange={(event) => {
-                            setNetlifyDeployMode(event.target.value as NetlifyDeployMode);
-                            setNetlifyResults([]);
-                          }}
-                          className="w-full p-2 border rounded bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-sky-500 focus:border-sky-500 text-sm"
-                        >
-                          <option value="default">Token mac dinh tren server</option>
-                          <option value="custom">Token rieng cua nguoi dung</option>
-                        </select>
-                      </label>
-
-                      <label className="block">
-                        <span className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                          Site slug
-                        </span>
-                        <input
-                          type="text"
-                          value={netlifySiteName}
-                          onChange={(event) => {
-                            setNetlifySiteName(event.target.value);
-                            setNetlifyResults([]);
-                          }}
-                          placeholder="Auto neu de trong"
-                          className="w-full p-2 border rounded bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-sky-500 focus:border-sky-500 text-sm"
-                        />
-                      </label>
-
-                      <label className={`block ${netlifyDeployMode === 'custom' ? '' : 'opacity-60'}`}>
-                        <span className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                          Netlify token rieng
-                        </span>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={netlifyToken}
-                            onChange={(event) => {
-                              setNetlifyToken(event.target.value);
-                              setNetlifyResults([]);
-                            }}
-                            placeholder="nfp_..."
-                            disabled={netlifyDeployMode !== 'custom'}
-                            style={showNetlifyToken ? undefined : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)}
-                            className="min-w-0 flex-1 p-2 border rounded bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-sky-500 focus:border-sky-500 text-sm disabled:cursor-not-allowed"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowNetlifyToken(prev => !prev)}
-                            disabled={netlifyDeployMode !== 'custom'}
-                            className="px-3 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 font-semibold rounded hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                          >
-                            {showNetlifyToken ? 'Hide' : 'Show'}
-                          </button>
-                        </div>
-                        <a
-                          href="https://app.netlify.com/user/applications#personal-access-tokens"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline"
-                        >
-                          Tao PAT
-                          <ExternalLinkIcon className="w-3 h-3" />
-                        </a>
-                      </label>
-                    </div>
-                  </div>
-                )}
-              </div>
-
               <div className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-950">
                 <button
                   type="button"
@@ -1515,9 +1421,9 @@ const App: React.FC = () => {
                   className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
                 >
                   <span>
-                    <span className="block text-sm font-bold text-gray-800 dark:text-gray-100">Cloudflare Pages/KV</span>
+                    <span className="block text-sm font-bold text-gray-800 dark:text-gray-100">Create Link settings</span>
                     <span className="block text-xs text-gray-500 dark:text-gray-400">
-                      Luu quiz vao KV, link dang /q/slug
+                      Cloudflare Pages/KV la kenh tao link chinh
                     </span>
                   </span>
                   <span className="text-sm font-semibold text-teal-700 dark:text-teal-300">
@@ -1703,56 +1609,10 @@ const App: React.FC = () => {
                   className="flex items-center justify-center px-5 py-2 bg-teal-700 text-white font-semibold rounded-lg shadow-md hover:bg-teal-800 disabled:bg-teal-300 disabled:cursor-not-allowed transition-all duration-300"
                 >
                   <CloudUploadIcon className="w-5 h-5 mr-2" />
-                  {isPublishingCloudflare ? 'Publishing...' : `Cloudflare Link${exportGroups.length > 1 ? 's' : ''}`}
-                </button>
-                <button
-                  onClick={handleDeployNetlify}
-                  disabled={isBusy || questions.length === 0 || (netlifyDeployMode === 'custom' && !hasCustomNetlifyToken)}
-                  className="flex items-center justify-center px-5 py-2 bg-slate-800 text-white font-semibold rounded-lg shadow-md hover:bg-slate-900 disabled:bg-slate-300 disabled:cursor-not-allowed transition-all duration-300"
-                >
-                  <CloudUploadIcon className="w-5 h-5 mr-2" />
-                  {isDeployingNetlify ? 'Deploying...' : `Create Link${exportGroups.length > 1 ? 's' : ''}`}
+                  {isPublishingCloudflare ? 'Creating...' : `Create Link${exportGroups.length > 1 ? 's' : ''}`}
                 </button>
               </div>
             </div>
-
-            {netlifyResults.length > 0 && (
-              <div className="mb-6 rounded-lg bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800">
-                <div className="px-3 py-2 border-b border-green-200 dark:border-green-800 text-sm font-bold text-green-700 dark:text-green-200">
-                  Da tao {netlifyResults.length} link Netlify
-                </div>
-                <div className="divide-y divide-green-200 dark:divide-green-800">
-                  {netlifyResults.map((result, index) => (
-                    <div key={`${result.siteId}-${result.deployId}-${index}`} className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 p-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold text-green-700 dark:text-green-200">
-                          {result.groupName} - {result.siteName} - {result.state}
-                        </div>
-                        <a
-                          href={result.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="break-all text-sky-700 dark:text-sky-300 font-semibold hover:underline"
-                        >
-                          {result.url}
-                        </a>
-                      </div>
-                      {result.adminUrl && (
-                        <a
-                          href={result.adminUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center justify-center gap-1 px-3 py-2 bg-white dark:bg-gray-800 border border-green-200 dark:border-green-800 rounded text-sm font-semibold text-green-700 dark:text-green-200 hover:bg-green-100 dark:hover:bg-green-900"
-                        >
-                          Dashboard
-                          <ExternalLinkIcon className="w-4 h-4" />
-                        </a>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {cloudflareResults.length > 0 && (
               <div className="mb-6 rounded-lg bg-teal-50 dark:bg-teal-950 border border-teal-200 dark:border-teal-800">
