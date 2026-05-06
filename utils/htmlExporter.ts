@@ -738,18 +738,40 @@ function initImageZoom() {
         });
     });
 }
-let ts = 0;
+let swipeState = { x: 0, y: 0, time: 0, active: false };
+function resetSwipeState() {
+    swipeState.active = false;
+    swipeState.x = 0;
+    swipeState.y = 0;
+    swipeState.time = 0;
+}
 document.addEventListener('touchstart', function(e) {
-    if (isImageViewerOpen() || e.touches.length > 1 || isImageGestureTarget(e.target)) {
-        ts = 0;
+    if (isImageViewerOpen() || e.touches.length !== 1 || isImageGestureTarget(e.target)) {
+        resetSwipeState();
         return;
     }
-    ts = e.changedTouches[0].screenX;
+    swipeState.active = true;
+    swipeState.x = e.touches[0].clientX;
+    swipeState.y = e.touches[0].clientY;
+    swipeState.time = Date.now();
 }, {passive:true});
 document.addEventListener('touchend', function(e) {
-    if (isImageViewerOpen() || ts === 0 || isImageGestureTarget(e.target)) return;
-    if(document.activeElement && document.activeElement.tagName === 'INPUT') return;
-    let te = e.changedTouches[0].screenX; if(Math.abs(ts - te) > 60) { if(ts > te) nextSlide(); else prevSlide(); }
+    if (isImageViewerOpen() || !swipeState.active || isImageGestureTarget(e.target)) {
+        resetSwipeState();
+        return;
+    }
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - swipeState.x;
+    const dy = touch.clientY - swipeState.y;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+    const elapsed = Date.now() - swipeState.time;
+    const isIntentionalHorizontalSwipe = absX >= 85 && absY <= 90 && absX >= absY * 1.5 && elapsed <= 1000;
+    resetSwipeState();
+    if (isIntentionalHorizontalSwipe) {
+        if (dx < 0) nextSlide();
+        else prevSlide();
+    }
 }, {passive:true});
 document.addEventListener('keydown', function(e) {
     if (isImageViewerOpen()) {
