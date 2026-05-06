@@ -195,7 +195,7 @@ body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background:
 .q-label { color: #d97706; font-weight: 900; margin-right: 10px; }
 mjx-container { font-size: var(--math-scale) !important; margin: 0 4px !important; }
 .img-container { text-align: center; margin: 5px 0 15px; width: 100%; }
-.real-image { display: inline-block; max-width: 90%; height: auto; max-height: 400px; border-radius: 12px; border: 2px solid #cbd5e1; box-shadow: 0 6px 10px rgba(0,0,0,0.1); cursor: ns-resize; }
+.real-image { display: inline-block; width: min(100%, 760px); max-width: 100%; height: auto; max-height: 42vh; object-fit: contain; border-radius: 12px; border: 2px solid #cbd5e1; box-shadow: 0 6px 10px rgba(0,0,0,0.1); cursor: zoom-in; touch-action: manipulation; background: white; }
 .img-hint { font-size: 14px; color: #64748b; font-style: italic; margin-top: 5px; opacity: 0.8; }
 .image-error { display: inline-flex; align-items: center; justify-content: center; min-height: 120px; width: min(620px, 90%); border: 2px dashed #fca5a5; border-radius: 12px; background: #fff7ed; color: #991b1b; font-size: 18px; font-weight: 900; padding: 16px; }
 .options-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 20px; }
@@ -290,7 +290,16 @@ input.answer-input:focus { border-color: #3b82f6; background: white; box-shadow:
 .review-body { padding: 16px; }
 .review-question { color: #0f172a; font-size: 20px; line-height: 1.45; font-weight: 850; margin-bottom: 14px; }
 .review-image { margin: 0 0 14px; border: 2px solid #e2e8f0; border-radius: 8px; background: #f8fafc; padding: 10px; text-align: center; }
-.review-image img { max-width: 100%; max-height: 240px; object-fit: contain; border-radius: 6px; background: white; }
+.review-image img { max-width: 100%; max-height: 240px; object-fit: contain; border-radius: 6px; background: white; cursor: zoom-in; }
+.image-lightbox { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(15, 23, 42, 0.94); z-index: 30000; overflow: hidden; touch-action: none; overscroll-behavior: contain; }
+.image-lightbox.open { display: flex; }
+.image-lightbox-stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; touch-action: none; cursor: grab; }
+.image-lightbox-stage.dragging { cursor: grabbing; }
+.image-lightbox-img { width: min(94vw, 1200px); height: min(82dvh, 900px); object-fit: contain; transform: translate3d(0, 0, 0) scale(1); transform-origin: center center; transition: transform 0.08s ease-out; user-select: none; -webkit-user-select: none; -webkit-user-drag: none; will-change: transform; }
+.image-lightbox-close { position: absolute; top: max(14px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); width: 52px; height: 52px; border: 2px solid rgba(255,255,255,0.55); border-radius: 999px; background: rgba(15, 23, 42, 0.72); color: white; font-size: 34px; line-height: 1; font-weight: 800; cursor: pointer; z-index: 2; display: flex; align-items: center; justify-content: center; touch-action: manipulation; }
+.image-lightbox-close:active { transform: scale(0.96); }
+.image-lightbox-help { position: absolute; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); transform: translateX(-50%); color: rgba(255,255,255,0.86); background: rgba(15, 23, 42, 0.58); border: 1px solid rgba(255,255,255,0.22); border-radius: 999px; padding: 9px 14px; font-size: 15px; font-weight: 750; text-align: center; max-width: min(92vw, 520px); pointer-events: none; }
+body.image-viewer-open { overflow: hidden; }
 .review-answer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
 .review-answer { border: 2px solid #e2e8f0; border-radius: 8px; background: #f8fafc; padding: 12px; min-width: 0; }
 .review-answer.user.wrong { border-color: #fed7aa; background: #fff7ed; }
@@ -318,6 +327,9 @@ input.answer-input:focus { border-color: #3b82f6; background: white; box-shadow:
   .timer { min-width: 150px; font-size: 18px; }
   .review-answer-grid { grid-template-columns: 1fr; }
   .review-question { font-size: 18px; }
+  .real-image { width: 100%; max-height: 34vh; }
+  .image-lightbox-close { width: 48px; height: 48px; font-size: 32px; }
+  .image-lightbox-help { font-size: 13px; bottom: max(12px, env(safe-area-inset-bottom)); }
 }
 </style>
 </head>
@@ -325,6 +337,13 @@ input.answer-input:focus { border-color: #3b82f6; background: white; box-shadow:
 <div id="home-screen" class="app-screen"></div>
 <div id="slides-root"></div>
 <div id="summary-screen" class="app-screen"></div>
+<div id="image-lightbox" class="image-lightbox" aria-hidden="true">
+  <button type="button" class="image-lightbox-close" onclick="closeImageViewer()" aria-label="Dong anh lon">&times;</button>
+  <div id="image-lightbox-stage" class="image-lightbox-stage">
+    <img id="image-lightbox-img" class="image-lightbox-img" alt="Anh cau hoi phong to" draggable="false">
+  </div>
+  <div class="image-lightbox-help">Chum/mo hai ngon de phong to, keo de xem anh</div>
+</div>
 <script>
 let currentSlide = 0;
 let slides = [];
@@ -391,7 +410,7 @@ function buildSlides(data) {
     const root = document.getElementById('slides-root');
     root.innerHTML = data.map(function(item, index) {
         const time = parseInt(item.time || 60, 10);
-        const image = item.image ? '<div class="img-container"><img class="real-image" src="' + esc(item.image) + '" onclick="openImage(this.src)" onerror="handleImageError(this)" style="width:80%"><div class="img-hint">Cuộn chuột trên ảnh để phóng to/thu nhỏ</div></div>' : '';
+        const image = item.image ? '<div class="img-container"><img class="real-image" src="' + esc(item.image) + '" onclick="openImage(this.src); return false;" onerror="handleImageError(this)" alt="Ảnh câu hỏi" draggable="false"><div class="img-hint">Bấm vào ảnh để xem lớn, chụm/mở hai ngón để zoom</div></div>' : '';
         let answerArea = '';
         let actions = '';
         if (item.type === 'mc') {
@@ -466,7 +485,207 @@ function editTimer(el) {
 }
 function nextSlide() { if (currentSlide < slides.length - 1) renderSlide(currentSlide + 1); }
 function prevSlide() { if (currentSlide > 0) renderSlide(currentSlide - 1); }
-function openImage(src) { const w = window.open(''); if (w) w.document.write('<img src="' + src + '" style="max-width:100%;">'); }
+const imageViewerState = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    dragStartX: 0,
+    dragStartY: 0,
+    dragBaseX: 0,
+    dragBaseY: 0,
+    pinchDistance: 0,
+    pinchScale: 1,
+    pinchBaseX: 0,
+    pinchBaseY: 0,
+    pinchCenterX: 0,
+    pinchCenterY: 0,
+    mouseDown: false
+};
+function imageViewerElements() {
+    return {
+        box: document.getElementById('image-lightbox'),
+        stage: document.getElementById('image-lightbox-stage'),
+        img: document.getElementById('image-lightbox-img')
+    };
+}
+function isImageViewerOpen() {
+    const box = document.getElementById('image-lightbox');
+    return Boolean(box && box.classList.contains('open'));
+}
+function isImageGestureTarget(target) {
+    return Boolean(target && target.closest && target.closest('.real-image, .review-image img, .image-lightbox'));
+}
+function applyImageViewerTransform() {
+    const img = document.getElementById('image-lightbox-img');
+    if (!img) return;
+    img.style.transform = 'translate3d(' + imageViewerState.x + 'px, ' + imageViewerState.y + 'px, 0) scale(' + imageViewerState.scale + ')';
+}
+function clampImageViewerPan() {
+    const img = document.getElementById('image-lightbox-img');
+    if (!img || imageViewerState.scale <= 1.01) {
+        imageViewerState.x = 0;
+        imageViewerState.y = 0;
+        return;
+    }
+    const maxX = Math.max(0, ((img.offsetWidth * imageViewerState.scale) - window.innerWidth) / 2 + 60);
+    const maxY = Math.max(0, ((img.offsetHeight * imageViewerState.scale) - window.innerHeight) / 2 + 60);
+    imageViewerState.x = Math.max(-maxX, Math.min(maxX, imageViewerState.x));
+    imageViewerState.y = Math.max(-maxY, Math.min(maxY, imageViewerState.y));
+}
+function resetImageViewerTransform() {
+    imageViewerState.scale = 1;
+    imageViewerState.x = 0;
+    imageViewerState.y = 0;
+    applyImageViewerTransform();
+}
+function setImageViewerScale(nextScale, focusX, focusY) {
+    const oldScale = imageViewerState.scale || 1;
+    const scale = Math.max(1, Math.min(6, nextScale));
+    if (Number.isFinite(focusX) && Number.isFinite(focusY) && oldScale > 0) {
+        const ratio = scale / oldScale;
+        imageViewerState.x = focusX - (window.innerWidth / 2) - (ratio * (focusX - (window.innerWidth / 2) - imageViewerState.x));
+        imageViewerState.y = focusY - (window.innerHeight / 2) - (ratio * (focusY - (window.innerHeight / 2) - imageViewerState.y));
+    }
+    imageViewerState.scale = scale;
+    clampImageViewerPan();
+    applyImageViewerTransform();
+}
+function touchDistance(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt((dx * dx) + (dy * dy));
+}
+function touchCenter(touches) {
+    return {
+        x: (touches[0].clientX + touches[1].clientX) / 2,
+        y: (touches[0].clientY + touches[1].clientY) / 2
+    };
+}
+function openImage(src) {
+    initImageViewer();
+    const els = imageViewerElements();
+    if (!els.box || !els.img) return;
+    els.img.src = src;
+    resetImageViewerTransform();
+    els.box.classList.add('open');
+    els.box.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('image-viewer-open');
+}
+function closeImageViewer() {
+    const els = imageViewerElements();
+    if (!els.box || !els.img) return;
+    els.box.classList.remove('open');
+    els.box.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('image-viewer-open');
+    imageViewerState.mouseDown = false;
+    if (els.stage) els.stage.classList.remove('dragging');
+    els.img.removeAttribute('src');
+    resetImageViewerTransform();
+}
+function initImageViewer() {
+    const els = imageViewerElements();
+    if (!els.box || !els.stage || !els.img || els.stage.dataset.ready === 'true') return;
+    els.stage.dataset.ready = 'true';
+
+    els.box.addEventListener('click', function(e) {
+        if (e.target === els.box) closeImageViewer();
+    });
+    els.stage.addEventListener('click', function(e) { e.stopPropagation(); });
+    els.stage.addEventListener('wheel', function(e) {
+        if (!isImageViewerOpen()) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const factor = e.deltaY < 0 ? 1.16 : 0.86;
+        setImageViewerScale(imageViewerState.scale * factor, e.clientX, e.clientY);
+    }, { passive: false });
+    els.stage.addEventListener('touchstart', function(e) {
+        if (!isImageViewerOpen()) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.touches.length >= 2) {
+            const center = touchCenter(e.touches);
+            imageViewerState.pinchDistance = touchDistance(e.touches);
+            imageViewerState.pinchScale = imageViewerState.scale;
+            imageViewerState.pinchBaseX = imageViewerState.x;
+            imageViewerState.pinchBaseY = imageViewerState.y;
+            imageViewerState.pinchCenterX = center.x;
+            imageViewerState.pinchCenterY = center.y;
+            return;
+        }
+        if (e.touches.length === 1) {
+            imageViewerState.dragStartX = e.touches[0].clientX;
+            imageViewerState.dragStartY = e.touches[0].clientY;
+            imageViewerState.dragBaseX = imageViewerState.x;
+            imageViewerState.dragBaseY = imageViewerState.y;
+            els.stage.classList.add('dragging');
+        }
+    }, { passive: false });
+    els.stage.addEventListener('touchmove', function(e) {
+        if (!isImageViewerOpen()) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.touches.length >= 2 && imageViewerState.pinchDistance > 0) {
+            const center = touchCenter(e.touches);
+            imageViewerState.x = imageViewerState.pinchBaseX + (center.x - imageViewerState.pinchCenterX);
+            imageViewerState.y = imageViewerState.pinchBaseY + (center.y - imageViewerState.pinchCenterY);
+            setImageViewerScale(imageViewerState.pinchScale * (touchDistance(e.touches) / imageViewerState.pinchDistance), center.x, center.y);
+            return;
+        }
+        if (e.touches.length === 1) {
+            imageViewerState.x = imageViewerState.dragBaseX + (e.touches[0].clientX - imageViewerState.dragStartX);
+            imageViewerState.y = imageViewerState.dragBaseY + (e.touches[0].clientY - imageViewerState.dragStartY);
+            clampImageViewerPan();
+            applyImageViewerTransform();
+        }
+    }, { passive: false });
+    els.stage.addEventListener('touchend', function(e) {
+        if (!isImageViewerOpen()) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.touches.length === 1) {
+            imageViewerState.dragStartX = e.touches[0].clientX;
+            imageViewerState.dragStartY = e.touches[0].clientY;
+            imageViewerState.dragBaseX = imageViewerState.x;
+            imageViewerState.dragBaseY = imageViewerState.y;
+        } else {
+            imageViewerState.pinchDistance = 0;
+            els.stage.classList.remove('dragging');
+        }
+    }, { passive: false });
+    els.stage.addEventListener('touchcancel', function(e) {
+        e.stopPropagation();
+        imageViewerState.pinchDistance = 0;
+        els.stage.classList.remove('dragging');
+    }, { passive: false });
+    els.stage.addEventListener('mousedown', function(e) {
+        if (!isImageViewerOpen() || e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        imageViewerState.mouseDown = true;
+        imageViewerState.dragStartX = e.clientX;
+        imageViewerState.dragStartY = e.clientY;
+        imageViewerState.dragBaseX = imageViewerState.x;
+        imageViewerState.dragBaseY = imageViewerState.y;
+        els.stage.classList.add('dragging');
+    });
+    document.addEventListener('mousemove', function(e) {
+        if (!imageViewerState.mouseDown || !isImageViewerOpen()) return;
+        e.preventDefault();
+        imageViewerState.x = imageViewerState.dragBaseX + (e.clientX - imageViewerState.dragStartX);
+        imageViewerState.y = imageViewerState.dragBaseY + (e.clientY - imageViewerState.dragStartY);
+        clampImageViewerPan();
+        applyImageViewerTransform();
+    });
+    document.addEventListener('mouseup', function() {
+        imageViewerState.mouseDown = false;
+        els.stage.classList.remove('dragging');
+    });
+    window.addEventListener('resize', function() {
+        if (!isImageViewerOpen()) return;
+        clampImageViewerPan();
+        applyImageViewerTransform();
+    });
+}
 function handleImageError(img) {
     img.style.display = 'none';
     const box = img.closest('.img-container') || img.parentElement;
@@ -520,12 +739,23 @@ function initImageZoom() {
     });
 }
 let ts = 0;
-document.addEventListener('touchstart', function(e) { ts = e.changedTouches[0].screenX; }, {passive:true});
+document.addEventListener('touchstart', function(e) {
+    if (isImageViewerOpen() || e.touches.length > 1 || isImageGestureTarget(e.target)) {
+        ts = 0;
+        return;
+    }
+    ts = e.changedTouches[0].screenX;
+}, {passive:true});
 document.addEventListener('touchend', function(e) {
+    if (isImageViewerOpen() || ts === 0 || isImageGestureTarget(e.target)) return;
     if(document.activeElement && document.activeElement.tagName === 'INPUT') return;
     let te = e.changedTouches[0].screenX; if(Math.abs(ts - te) > 60) { if(ts > te) nextSlide(); else prevSlide(); }
 }, {passive:true});
 document.addEventListener('keydown', function(e) {
+    if (isImageViewerOpen()) {
+        if (e.key === 'Escape') closeImageViewer();
+        return;
+    }
     if(document.activeElement && document.activeElement.tagName === 'INPUT') return;
     if(e.key === 'ArrowRight') nextSlide();
     if(e.key === 'ArrowLeft') prevSlide();
@@ -722,7 +952,7 @@ function buildSlides(data) {
     const root = document.getElementById('slides-root');
     root.innerHTML = data.map(function(item, index) {
         const time = parseInt(item.time || 60, 10);
-        const image = item.image ? '<div class="img-container"><img class="real-image" src="' + esc(item.image) + '" onclick="openImage(this.src)" style="width:80%"><div class="img-hint">Cuộn chuột trên ảnh để phóng to/thu nhỏ</div></div>' : '';
+        const image = item.image ? '<div class="img-container"><img class="real-image" src="' + esc(item.image) + '" onclick="openImage(this.src); return false;" onerror="handleImageError(this)" alt="Ảnh câu hỏi" draggable="false"><div class="img-hint">Bấm vào ảnh để xem lớn, chụm/mở hai ngón để zoom</div></div>' : '';
         let answerArea = '';
         let actions = '';
         if (item.type === 'mc') {
@@ -1004,7 +1234,7 @@ function buildTypeRows(wrongIds) {
 }
 function buildReviewImage(item) {
     if (!item || !item.image) return '';
-    return '<div class="review-image"><img src="' + esc(item.image) + '" onclick="openImage(this.src)" onerror="handleImageError(this)" alt="Ảnh minh họa câu hỏi"></div>';
+    return '<div class="review-image"><img src="' + esc(item.image) + '" onclick="openImage(this.src); return false;" onerror="handleImageError(this)" alt="Ảnh minh họa câu hỏi" draggable="false"></div>';
 }
 function buildReviewList(wrongIds) {
     const wrongSet = {};
@@ -1062,7 +1292,7 @@ function initSlides(data) {
 }
 </script>
 <script type="application/json" id="quiz-data">${slidesJson}</script>
-<script>initSlides(JSON.parse(document.getElementById('quiz-data').textContent || '[]'));</script>
+<script>initImageViewer(); initSlides(JSON.parse(document.getElementById('quiz-data').textContent || '[]'));</script>
 </body>
 </html>`;
 };
