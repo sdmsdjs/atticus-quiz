@@ -1,4 +1,4 @@
-import{m as u,Q as c,s as f}from"./index-CmFlbySH.js";const p=["A","B","C","D","E"],h=t=>t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"),m=t=>{const n=t.trim().toUpperCase();if(!n)return null;if(/^\d+$/.test(n)){const i=Number(n)-1;return i>=0?i:null}const e=p.indexOf(n);return e>=0?e:null},b=t=>{const n=t.correctAnswer.split(",").map(m).filter(e=>e!==null);return new Set(n)},x=t=>{const n=t.correctAnswer.trim(),e=m(n);return e!==null&&t.options[e]?t.options[e]:n&&n!=="1"?n:t.options[0]||""},w=t=>t.questionType===c.Checkbox?2:t.questionType===c.FillInTheBlank?3:1,v=t=>{const n=new Map;return t.map(e=>{const i=w(e),o=(n.get(i)||0)+1;n.set(i,o);const r=b(e),l=Number(e.timeInSeconds)||60;return e.questionType===c.Checkbox?{title:`Câu ${o}`,part:i,type:"tf",content:e.questionText,explanation:e.answerExplanation,options:e.options.map((d,a)=>({label:`${String.fromCharCode(97+a)})`,text:d,is_correct:r.has(a)})),correct_answer:"",image:e.imageLink||void 0,time:l}:e.questionType===c.FillInTheBlank?{title:`Câu ${o}`,part:i,type:"short",content:e.questionText,explanation:e.answerExplanation,options:[],correct_answer:x(e),image:e.imageLink||void 0,time:l}:{title:`Câu ${o}`,part:i,type:"mc",content:e.questionText,explanation:e.answerExplanation,options:e.options.map((d,a)=>({label:p[a]||String(a+1),text:d,is_correct:r.has(a)})),correct_answer:"",image:e.imageLink||void 0,time:l}})},y=t=>JSON.stringify(t).replace(/</g,"\\u003C").replace(/>/g,"\\u003E").replace(/&/g,"\\u0026").replace(/\u2028/g,"\\u2028").replace(/\u2029/g,"\\u2029"),s=t=>{const n=String(t||"");return/\\\(|\\\)|\\\[|\\\]|\\begin\{|\\end\{|\\frac|\\sqrt|\\sum|\\int|\\lim|\\times|\\cdot|\\leq|\\geq|\$\$|<math\b|<\/math>/i.test(n)||/\$[^$\n]{1,200}\$/.test(n)},S=t=>t.some(n=>s(n.content)||s(n.explanation)||s(n.correct_answer)||n.options.some(e=>s(e.text))),g=(t,n=u(t))=>{const e=h(n),i=v(t),o=y(i),r=S(i)?'<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"><\/script>':"";return`<!DOCTYPE html>
+import{m as u,Q as c,s as f}from"./index-CiZ66KSK.js";const p=["A","B","C","D","E"],h=t=>t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"),m=t=>{const n=t.trim().toUpperCase();if(!n)return null;if(/^\d+$/.test(n)){const i=Number(n)-1;return i>=0?i:null}const e=p.indexOf(n);return e>=0?e:null},b=t=>{const n=t.correctAnswer.split(",").map(m).filter(e=>e!==null);return new Set(n)},x=t=>{const n=t.correctAnswer.trim(),e=m(n);return e!==null&&t.options[e]?t.options[e]:n&&n!=="1"?n:t.options[0]||""},w=t=>t.questionType===c.Checkbox?2:t.questionType===c.FillInTheBlank?3:1,v=t=>{const n=new Map;return t.map(e=>{const i=w(e),o=(n.get(i)||0)+1;n.set(i,o);const r=b(e),l=Number(e.timeInSeconds)||60;return e.questionType===c.Checkbox?{title:`Câu ${o}`,part:i,type:"tf",content:e.questionText,explanation:e.answerExplanation,options:e.options.map((d,a)=>({label:`${String.fromCharCode(97+a)})`,text:d,is_correct:r.has(a)})),correct_answer:"",image:e.imageLink||void 0,time:l}:e.questionType===c.FillInTheBlank?{title:`Câu ${o}`,part:i,type:"short",content:e.questionText,explanation:e.answerExplanation,options:[],correct_answer:x(e),image:e.imageLink||void 0,time:l}:{title:`Câu ${o}`,part:i,type:"mc",content:e.questionText,explanation:e.answerExplanation,options:e.options.map((d,a)=>({label:p[a]||String(a+1),text:d,is_correct:r.has(a)})),correct_answer:"",image:e.imageLink||void 0,time:l}})},y=t=>JSON.stringify(t).replace(/</g,"\\u003C").replace(/>/g,"\\u003E").replace(/&/g,"\\u0026").replace(/\u2028/g,"\\u2028").replace(/\u2029/g,"\\u2029"),s=t=>{const n=String(t||"");return/\\\(|\\\)|\\\[|\\\]|\\begin\{|\\end\{|\\frac|\\sqrt|\\sum|\\int|\\lim|\\times|\\cdot|\\leq|\\geq|\$\$|<math\b|<\/math>/i.test(n)||/\$[^$\n]{1,200}\$/.test(n)},S=t=>t.some(n=>s(n.content)||s(n.explanation)||s(n.correct_answer)||n.options.some(e=>s(e.text))),g=(t,n=u(t))=>{const e=h(n),i=v(t),o=y(i),r=S(i)?'<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"><\/script>':"";return`<!DOCTYPE html>
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
@@ -573,18 +573,40 @@ function initImageZoom() {
         });
     });
 }
-let ts = 0;
+let swipeState = { x: 0, y: 0, time: 0, active: false };
+function resetSwipeState() {
+    swipeState.active = false;
+    swipeState.x = 0;
+    swipeState.y = 0;
+    swipeState.time = 0;
+}
 document.addEventListener('touchstart', function(e) {
-    if (isImageViewerOpen() || e.touches.length > 1 || isImageGestureTarget(e.target)) {
-        ts = 0;
+    if (isImageViewerOpen() || e.touches.length !== 1 || isImageGestureTarget(e.target)) {
+        resetSwipeState();
         return;
     }
-    ts = e.changedTouches[0].screenX;
+    swipeState.active = true;
+    swipeState.x = e.touches[0].clientX;
+    swipeState.y = e.touches[0].clientY;
+    swipeState.time = Date.now();
 }, {passive:true});
 document.addEventListener('touchend', function(e) {
-    if (isImageViewerOpen() || ts === 0 || isImageGestureTarget(e.target)) return;
-    if(document.activeElement && document.activeElement.tagName === 'INPUT') return;
-    let te = e.changedTouches[0].screenX; if(Math.abs(ts - te) > 60) { if(ts > te) nextSlide(); else prevSlide(); }
+    if (isImageViewerOpen() || !swipeState.active || isImageGestureTarget(e.target)) {
+        resetSwipeState();
+        return;
+    }
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - swipeState.x;
+    const dy = touch.clientY - swipeState.y;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+    const elapsed = Date.now() - swipeState.time;
+    const isIntentionalHorizontalSwipe = absX >= 85 && absY <= 90 && absX >= absY * 1.5 && elapsed <= 1000;
+    resetSwipeState();
+    if (isIntentionalHorizontalSwipe) {
+        if (dx < 0) nextSlide();
+        else prevSlide();
+    }
 }, {passive:true});
 document.addEventListener('keydown', function(e) {
     if (isImageViewerOpen()) {
